@@ -10,7 +10,7 @@ import 'package:pro_video_editor/pro_video_editor.dart';
 
 import '/features/editor/widgets/pixel_transparent_painter.dart';
 
-/// A widget that previews a video from raw bytes.
+/// A widget that previews a video from a local file path or remote URL.
 ///
 /// Displays the video and optionally shows when it was generated.
 class PreviewVideo extends StatefulWidget {
@@ -21,7 +21,7 @@ class PreviewVideo extends StatefulWidget {
     required this.generationTime,
   });
 
-  /// The file path of the video to be previewed.
+  /// The file path or remote URL of the video to be previewed.
   final String filePath;
 
   /// The time it took to generate the video preview.
@@ -41,13 +41,27 @@ class _PreviewVideoState extends State<PreviewVideo> {
 
   final _numberFormatter = NumberFormat();
 
+  /// Kiểm tra filePath là URL mạng hay file cục bộ.
+  bool get _isRemoteUrl {
+    final path = widget.filePath;
+    return path.startsWith('http://') || path.startsWith('https://');
+  }
+
   @override
   void initState() {
     super.initState();
 
-    _videoMetadata = ProVideoEditor.instance.getMetadata(
-      EditorVideo.file(widget.filePath),
-    );
+    // Nếu là URL mạng thì getMetadata dùng network, không dùng file
+    if (_isRemoteUrl) {
+      _videoMetadata = ProVideoEditor.instance.getMetadata(
+        EditorVideo.network(widget.filePath),
+      );
+    } else {
+      _videoMetadata = ProVideoEditor.instance.getMetadata(
+        EditorVideo.file(widget.filePath),
+      );
+    }
+
     _initializePlayer();
   }
 
@@ -58,8 +72,11 @@ class _PreviewVideoState extends State<PreviewVideo> {
   }
 
   void _initializePlayer() async {
-    var media = Media('file://${widget.filePath}');
-    await _player.open(media, play: false);
+    // Media tự xử lý cả file:// và https:// — chỉ cần thêm prefix đúng
+    final mediaUrl = _isRemoteUrl
+        ? widget.filePath
+        : 'file://${widget.filePath}';
+    await _player.open(Media(mediaUrl), play: false);
   }
 
   String formatBytes(int bytes, [int decimals = 2]) {
@@ -77,7 +94,7 @@ class _PreviewVideoState extends State<PreviewVideo> {
         return Theme(
           data: Theme.of(context),
           child: Scaffold(
-            appBar: AppBar(title: const Text('Result')),
+            appBar: AppBar(title: const Text('Xem trước')),
             body: CustomPaint(
               painter: const PixelTransparentPainter(
                 primary: Color.fromARGB(255, 17, 17, 17),
@@ -102,11 +119,11 @@ class _PreviewVideoState extends State<PreviewVideo> {
     return FutureBuilder<VideoMetadata>(
       future: _videoMetadata,
       builder: (context, snapshot) {
-        final aspectRatio = snapshot.data?.resolution.aspectRatio ?? 1;
+        final aspectRatio =
+            snapshot.data?.resolution.aspectRatio ?? 1;
         final rotation = snapshot.data?.rotation ?? 0;
 
-        int convertedRotation = rotation % 360;
-
+        final convertedRotation = rotation % 360;
         final is90DegRotated =
             convertedRotation == 90 || convertedRotation == 270;
 
@@ -122,6 +139,7 @@ class _PreviewVideoState extends State<PreviewVideo> {
           height = maxHeight;
           width = height * aspectRatio;
         }
+
         return Center(
           child: AspectRatio(
             aspectRatio: aspectRatio,
@@ -139,7 +157,7 @@ class _PreviewVideoState extends State<PreviewVideo> {
   }
 
   Widget _buildGenerationInfos() {
-    TableRow tableSpace = const TableRow(
+    const tableSpace = TableRow(
       children: [SizedBox(height: 3), SizedBox()],
     );
     return Positioned(
@@ -152,14 +170,18 @@ class _PreviewVideoState extends State<PreviewVideo> {
               color: Colors.black.withValues(alpha: 0.5),
               borderRadius: BorderRadius.circular(7),
             ),
-            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+            padding: const EdgeInsets.symmetric(
+              vertical: 8,
+              horizontal: 12,
+            ),
             child: FutureBuilder<VideoMetadata>(
               future: _videoMetadata,
               builder: (context, snapshot) {
-                var data = snapshot.data;
+                final data = snapshot.data;
 
                 if (data == null ||
-                    snapshot.connectionState == ConnectionState.waiting) {
+                    snapshot.connectionState ==
+                        ConnectionState.waiting) {
                   return const CircularProgressIndicator.adaptive();
                 }
 
@@ -172,25 +194,26 @@ class _PreviewVideoState extends State<PreviewVideo> {
                 return Table(
                   defaultColumnWidth: const IntrinsicColumnWidth(),
                   children: [
-                    TableRow(
-                      children: [
-                        const Text('Generation-Time'),
-                        Padding(
-                          padding: const EdgeInsets.only(left: 8.0),
-                          child: Text(
-                            '${_numberFormatter.format(_generationTime)} ms',
-                            style: _valueStyle,
-                            textAlign: TextAlign.right,
+                    if (_generationTime > 0)
+                      TableRow(
+                        children: [
+                          const Text('Thời gian render'),
+                          Padding(
+                            padding: const EdgeInsets.only(left: 8),
+                            child: Text(
+                              '${_numberFormatter.format(_generationTime)} ms',
+                              style: _valueStyle,
+                              textAlign: TextAlign.right,
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                    tableSpace,
+                        ],
+                      ),
+                    if (_generationTime > 0) tableSpace,
                     TableRow(
                       children: [
-                        const Text('Video-Size'),
+                        const Text('Kích thước'),
                         Padding(
-                          padding: const EdgeInsets.only(left: 8.0),
+                          padding: const EdgeInsets.only(left: 8),
                           child: Text(
                             formatBytes(data.fileSize),
                             style: _valueStyle,
@@ -202,9 +225,9 @@ class _PreviewVideoState extends State<PreviewVideo> {
                     tableSpace,
                     TableRow(
                       children: [
-                        const Text('Content-Type'),
+                        const Text('Định dạng'),
                         Padding(
-                          padding: const EdgeInsets.only(left: 8.0),
+                          padding: const EdgeInsets.only(left: 8),
                           child: Text(
                             'video/${data.extension}',
                             style: _valueStyle,
@@ -216,9 +239,9 @@ class _PreviewVideoState extends State<PreviewVideo> {
                     tableSpace,
                     TableRow(
                       children: [
-                        const Text('Dimension'),
+                        const Text('Độ phân giải'),
                         Padding(
-                          padding: const EdgeInsets.only(left: 8.0),
+                          padding: const EdgeInsets.only(left: 8),
                           child: Text(
                             dimension,
                             style: _valueStyle,
@@ -230,9 +253,9 @@ class _PreviewVideoState extends State<PreviewVideo> {
                     tableSpace,
                     TableRow(
                       children: [
-                        const Text('Video-Duration'),
+                        const Text('Thời lượng'),
                         Padding(
-                          padding: const EdgeInsets.only(left: 8.0),
+                          padding: const EdgeInsets.only(left: 8),
                           child: Text(
                             '${data.duration.inSeconds} s',
                             style: _valueStyle,

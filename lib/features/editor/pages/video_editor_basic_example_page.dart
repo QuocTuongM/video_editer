@@ -13,15 +13,18 @@ import 'package:pro_video_editor_example/features/editor/services/audio_helper_s
 import 'package:video_player/video_player.dart' hide VideoAudioTrack;
 
 import '/core/constants/example_audio_tracks_constant.dart';
-import '/core/constants/example_constants.dart';
-import '/features/editor/widgets/video_initializing_widget.dart';
+import '/core/services/auth_service.dart';
+import '/core/services/local_video_repository.dart';
+import '/shared/widgets/app_loading_overlay.dart';
+import '/shared/widgets/app_snack_bar.dart';
 import '../widgets/clips_previewer.dart';
 import '../widgets/preview_video.dart';
+import '../widgets/video_initializing_widget.dart';
 import '../widgets/video_progress_alert.dart';
 
-/// A sample page demonstrating how to use the video-editor.
+/// Màn hình chọn video từ album và mở trình chỉnh sửa.
 class VideoEditorBasicExamplePage extends StatefulWidget {
-  /// Creates a [VideoEditorBasicExamplePage] widget.
+  /// Khởi tạo [VideoEditorBasicExamplePage].
   const VideoEditorBasicExamplePage({super.key});
 
   @override
@@ -32,186 +35,271 @@ class VideoEditorBasicExamplePage extends StatefulWidget {
 class _VideoEditorBasicExamplePageState
     extends State<VideoEditorBasicExamplePage> {
   final _editorKey = GlobalKey<ProImageEditorState>();
-
   final _taskId = DateTime.now().microsecondsSinceEpoch.toString();
-
-  /// The target format for the exported video.
   final _outputFormat = VideoOutputFormat.mp4;
 
-  /// Indicates whether a seek operation is in progress.
   bool _isSeeking = false;
-
-  /// Stores the currently selected trim duration span.
   TrimDurationSpan? _durationSpan;
-
-  /// Temporarily stores a pending trim duration span.
   TrimDurationSpan? _tempDurationSpan;
-
-  /// Controls video playback and trimming functionalities.
   ProVideoController? _proVideoController;
-
-  /// Stores generated thumbnails for the trimmer bar and filter background.
   List<ImageProvider>? _thumbnails;
-
-  /// Holds information about the selected video.
-  ///
-  /// This will be populated via [_setMetadata].
   late VideoMetadata _videoMetadata;
-
-  /// Number of thumbnails to generate across the video timeline.
   final int _thumbnailCount = 7;
 
-  /// The video currently loaded in the editor.
-  EditorVideo _video = EditorVideo.asset(kVideoEditorExampleH264Path);
+  /// Video đang dùng trong editor (được set sau khi chọn từ album).
+  EditorVideo? _video;
+
+  /// Tên file gốc (dùng để đặt tên khi upload).
+  String _originalFileName = 'video';
 
   final _proVideoEditor = ProVideoEditor.instance;
+  final _repo = LocalVideoRepository();
+  final _auth = AuthService();
 
   String? _outputPath;
   final Map<String, Uint8List> _cachedKeyFrames = {};
   final Map<String, List<Uint8List>> _cachedKeyFrameList = {};
 
-  /// The duration it took to generate the exported video.
   Duration _videoGenerationTime = Duration.zero;
-  late VideoPlayerController _videoController;
+  VideoPlayerController? _videoController;
 
-  late final _audioService = AudioHelperService(
-    videoController: _videoController,
-  );
+  AudioHelperService? _audioService;
   final _updateClipsNotifier = ValueNotifier(false);
 
-  late final ProImageEditorConfigs _configs = ProImageEditorConfigs(
-    dialogConfigs: DialogConfigs(
-      widgets: DialogWidgets(
-        loadingDialog: (message, configs) =>
-            VideoProgressAlert(taskId: _taskId),
-      ),
-    ),
-    mainEditor: MainEditorConfigs(
-      tools: [
-        SubEditorMode.videoClips,
-        SubEditorMode.audio,
-        SubEditorMode.paint,
-        SubEditorMode.text,
-        SubEditorMode.cropRotate,
-        SubEditorMode.tune,
-        SubEditorMode.filter,
-        SubEditorMode.blur,
-        SubEditorMode.emoji,
-        SubEditorMode.sticker,
-      ],
-      widgets: MainEditorWidgets(
-        removeLayerArea:
-            (removeAreaKey, editor, rebuildStream, isLayerBeingTransformed) =>
-                VideoEditorRemoveArea(
-                  removeAreaKey: removeAreaKey,
-                  editor: editor,
-                  rebuildStream: rebuildStream,
-                  isLayerBeingTransformed: isLayerBeingTransformed,
-                ),
-      ),
-    ),
-    paintEditor: const PaintEditorConfigs(
-      tools: [
-        PaintMode.freeStyle,
-        PaintMode.arrow,
-        PaintMode.line,
-        PaintMode.rect,
-        PaintMode.circle,
-        PaintMode.dashLine,
-        PaintMode.polygon,
-        // Blur and pixelate are not supported.
-        // PaintMode.pixelate,
-        // PaintMode.blur,
-        PaintMode.eraser,
-      ],
-    ),
-    audioEditor: AudioEditorConfigs(audioTracks: kExampleAudioTracks),
-    clipsEditor: ClipsEditorConfigs(
-      clips: [
-        VideoClip(
-          id: '001',
-          title: 'My awesome video',
-          // subtitle: 'Optional',
-          duration: Duration.zero,
-          clip: EditorVideoClip.autoSource(
-            assetPath: _video.assetPath,
-            bytes: _video.byteArray,
-            file: _video.file,
-            networkUrl: _video.networkUrl,
-          ),
-        ),
-      ],
-    ),
-    videoEditor: const VideoEditorConfigs(
-      initialMuted: false,
-      initialPlay: false,
-      isAudioSupported: true,
-      minTrimDuration: Duration(seconds: 7),
-      playTimeSmoothingDuration: Duration(milliseconds: 600),
-    ),
-    imageGeneration: const ImageGenerationConfigs(
-      captureImageByteFormat: ImageByteFormat.rawStraightRgba,
-    ),
-  );
+  bool _isPicking = false;
+  bool _isEditorReady = false;
+
+  late ProImageEditorConfigs _configs;
 
   @override
   void initState() {
     super.initState();
-    _initializePlayer();
+    // Chọn video ngay khi vào trang
+    WidgetsBinding.instance.addPostFrameCallback((_) => _pickAndInit());
   }
 
   @override
   void dispose() {
-    _videoController.dispose();
-    _audioService.dispose();
+    _videoController?.dispose();
+    _audioService?.dispose();
     _updateClipsNotifier.dispose();
     super.dispose();
   }
 
-  /// Loads and sets [_videoMetadata] for the given [_video].
-  Future<void> _setMetadata() async {
-    _videoMetadata = await _proVideoEditor.getMetadata(_video);
+  // ─── Chọn video từ album ───────────────────────────────────────────────────
+
+  Future<void> _pickAndInit() async {
+    if (_isPicking) return;
+    setState(() => _isPicking = true);
+
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.video,
+        allowMultiple: false,
+        withData: false,
+      );
+
+      if (result == null || result.files.isEmpty) {
+        if (mounted) Navigator.pop(context);
+        return;
+      }
+
+      final file = result.files.single;
+      final path = file.path;
+
+      if (path == null || path.isEmpty) {
+        if (mounted) {
+          AppSnackBar.error(context, 'Không thể đọc file này trên thiết bị.');
+          Navigator.pop(context);
+        }
+        return;
+      }
+
+      _originalFileName = file.name;
+      _video = EditorVideo.file(path);
+
+      await _initializeEditor();
+    } catch (e) {
+      if (mounted) {
+        AppSnackBar.error(context, 'Lỗi chọn video: $e');
+        Navigator.pop(context);
+      }
+    } finally {
+      if (mounted) setState(() => _isPicking = false);
+    }
   }
 
-  /// Generates thumbnails for the given [_video].
-  Future<void> _generateThumbnails({bool updateClipThumbnails = true}) async {
+  // ─── Khởi tạo editor ───────────────────────────────────────────────────────
+
+  Future<void> _initializeEditor() async {
+    final video = _video;
+    if (video == null) return;
+
+    await _setMetadata();
+
+    // Build configs sau khi có metadata
+    _configs = _buildConfigs(video);
+
+    _configs.clipsEditor.clips.first = _configs.clipsEditor.clips.first
+        .copyWith(duration: _videoMetadata.duration);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _generateThumbnails();
+    });
+
+    final path = video.file?.path ?? '';
+    final newController = io.File(path).existsSync()
+        ? VideoPlayerController.file(io.File(path))
+        : VideoPlayerController.asset('assets/demo.mp4');
+
+    _audioService = AudioHelperService(videoController: newController);
+
+    await Future.wait([
+      newController.initialize(),
+      newController.setLooping(false),
+      newController.setVolume(
+        _configs.videoEditor.initialMuted ? 0 : 100,
+      ),
+      _configs.videoEditor.initialPlay
+          ? newController.play()
+          : newController.pause(),
+      _audioService!.initialize(),
+    ]);
+
     if (!mounted) return;
-    var imageWidth =
+
+    _videoController?.dispose();
+    _videoController = newController;
+
+    _proVideoController = ProVideoController(
+      videoPlayer: _buildVideoPlayer(),
+      initialResolution: _videoMetadata.resolution,
+      videoDuration: _videoMetadata.duration,
+      fileSize: _videoMetadata.fileSize,
+      thumbnails: _thumbnails,
+    );
+
+    _videoController!.addListener(_onDurationChange);
+
+    setState(() => _isEditorReady = true);
+  }
+
+  Future<void> _setMetadata() async {
+    _videoMetadata = await _proVideoEditor.getMetadata(_video!);
+  }
+
+  ProImageEditorConfigs _buildConfigs(EditorVideo video) {
+    return ProImageEditorConfigs(
+      dialogConfigs: DialogConfigs(
+        widgets: DialogWidgets(
+          loadingDialog: (message, configs) =>
+              VideoProgressAlert(taskId: _taskId),
+        ),
+      ),
+      mainEditor: MainEditorConfigs(
+        tools: [
+          SubEditorMode.videoClips,
+          SubEditorMode.audio,
+          SubEditorMode.paint,
+          SubEditorMode.text,
+          SubEditorMode.cropRotate,
+          SubEditorMode.tune,
+          SubEditorMode.filter,
+          SubEditorMode.blur,
+          SubEditorMode.emoji,
+          SubEditorMode.sticker,
+        ],
+        widgets: MainEditorWidgets(
+          removeLayerArea:
+              (removeAreaKey, editor, rebuildStream, isLayerBeingTransformed) =>
+                  VideoEditorRemoveArea(
+            removeAreaKey: removeAreaKey,
+            editor: editor,
+            rebuildStream: rebuildStream,
+            isLayerBeingTransformed: isLayerBeingTransformed,
+          ),
+        ),
+      ),
+      paintEditor: const PaintEditorConfigs(
+        tools: [
+          PaintMode.freeStyle,
+          PaintMode.arrow,
+          PaintMode.line,
+          PaintMode.rect,
+          PaintMode.circle,
+          PaintMode.dashLine,
+          PaintMode.polygon,
+          PaintMode.eraser,
+        ],
+      ),
+      audioEditor: AudioEditorConfigs(audioTracks: kExampleAudioTracks),
+      clipsEditor: ClipsEditorConfigs(
+        clips: [
+          VideoClip(
+            id: '001',
+            title: _originalFileName.split('.').first,
+            duration: Duration.zero,
+            clip: EditorVideoClip.autoSource(
+              assetPath: video.assetPath,
+              bytes: video.byteArray,
+              file: video.file,
+              networkUrl: video.networkUrl,
+            ),
+          ),
+        ],
+      ),
+      videoEditor: const VideoEditorConfigs(
+        initialMuted: false,
+        initialPlay: false,
+        isAudioSupported: true,
+        minTrimDuration: Duration(seconds: 1),
+        playTimeSmoothingDuration: Duration(milliseconds: 600),
+      ),
+      imageGeneration: const ImageGenerationConfigs(
+        captureImageByteFormat: ImageByteFormat.rawStraightRgba,
+      ),
+    );
+  }
+
+  // ─── Thumbnails ────────────────────────────────────────────────────────────
+
+  Future<void> _generateThumbnails({
+    bool updateClipThumbnails = true,
+  }) async {
+    if (!mounted) return;
+
+    final imageWidth =
         MediaQuery.sizeOf(context).width /
         _thumbnailCount *
         MediaQuery.devicePixelRatioOf(context);
 
-    List<Uint8List> thumbnailList = [];
-
-    /// On android `getKeyFrames` is a way faster than `getThumbnails` but
-    /// the timestamps are more "random". If you want the best results i
-    /// recommend you to use only `getThumbnails`.
     final duration = _videoMetadata.duration;
     final segmentDuration = duration.inMilliseconds / _thumbnailCount;
-    thumbnailList = await _proVideoEditor.getThumbnails(
+
+    final thumbnailList = await _proVideoEditor.getThumbnails(
       ThumbnailConfigs(
-        video: _video,
+        video: _video!,
         outputSize: Size.square(imageWidth),
         boxFit: ThumbnailBoxFit.cover,
         timestamps: List.generate(_thumbnailCount, (i) {
-          final midpointMs = (i + 0.5) * segmentDuration;
-          return Duration(milliseconds: midpointMs.round());
+          final ms = (i + 0.5) * segmentDuration;
+          return Duration(milliseconds: ms.round());
         }),
         outputFormat: ThumbnailFormat.jpeg,
       ),
     );
 
-    List<ImageProvider> temporaryThumbnails = thumbnailList
-        .map(MemoryImage.new)
-        .toList();
+    final temporaryThumbnails =
+        thumbnailList.map(MemoryImage.new).toList();
 
-    if (updateClipThumbnails) {
+    if (updateClipThumbnails && _configs.clipsEditor.clips.isNotEmpty) {
       _configs.clipsEditor.clips.first = _configs.clipsEditor.clips.first
           .copyWith(thumbnails: temporaryThumbnails);
     }
 
-    /// Optional precache every thumbnail
-    var cacheList = temporaryThumbnails.map(
+    if (!mounted) return;
+
+    final cacheList = temporaryThumbnails.map(
       (item) => precacheImage(item, context),
     );
     await Future.wait(cacheList);
@@ -222,44 +310,14 @@ class _VideoEditorBasicExamplePageState
     }
   }
 
-  Future<void> _initializePlayer() async {
-    await _setMetadata();
-
-    _configs.clipsEditor.clips.first = _configs.clipsEditor.clips.first
-        .copyWith(duration: _videoMetadata.duration);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _generateThumbnails();
-    });
-
-    _videoController = VideoPlayerController.asset(kVideoEditorExampleH264Path);
-
-    await Future.wait([
-      _videoController.initialize(),
-      _videoController.setLooping(false),
-      _videoController.setVolume(_configs.videoEditor.initialMuted ? 0 : 100),
-      _configs.videoEditor.initialPlay
-          ? _videoController.play()
-          : _videoController.pause(),
-      _audioService.initialize(),
-    ]);
-    if (!mounted) return;
-
-    _proVideoController = ProVideoController(
-      videoPlayer: _buildVideoPlayer(),
-      initialResolution: _videoMetadata.resolution,
-      videoDuration: _videoMetadata.duration,
-      fileSize: _videoMetadata.fileSize,
-      thumbnails: _thumbnails,
-    );
-
-    _videoController.addListener(_onDurationChange);
-
-    setState(() {});
-  }
+  // ─── Playback ──────────────────────────────────────────────────────────────
 
   void _onDurationChange() {
-    var totalVideoDuration = _videoMetadata.duration;
-    var duration = _videoController.value.position;
+    final controller = _videoController;
+    if (controller == null) return;
+
+    final totalVideoDuration = _videoMetadata.duration;
+    final duration = controller.value.position;
     _proVideoController!.setPlayTime(duration);
 
     if (_durationSpan != null && duration >= _durationSpan!.end) {
@@ -273,42 +331,38 @@ class _VideoEditorBasicExamplePageState
 
   Future<void> _seekToPosition(TrimDurationSpan span) async {
     _durationSpan = span;
-
     if (_isSeeking) {
-      _tempDurationSpan = span; // Store the latest seek request
+      _tempDurationSpan = span;
       return;
     }
     _isSeeking = true;
-
     _proVideoController!.pause();
     _proVideoController!.setPlayTime(_durationSpan!.start);
-
-    await _videoController.pause();
-    await _videoController.seekTo(span.start);
-
+    await _videoController!.pause();
+    await _videoController!.seekTo(span.start);
     _isSeeking = false;
 
-    // Check if there's a pending seek request
     if (_tempDurationSpan != null) {
-      TrimDurationSpan nextSeek = _tempDurationSpan!;
-      _tempDurationSpan = null; // Clear the pending seek
-      await _seekToPosition(nextSeek); // Process the latest request
+      final nextSeek = _tempDurationSpan!;
+      _tempDurationSpan = null;
+      await _seekToPosition(nextSeek);
     }
   }
 
-  /// Generates the final video based on the given [parameters].
-  ///
-  /// Applies blur, color filters, cropping, rotation, flipping, and trimming
-  /// before exporting using FFmpeg. Measures and stores the generation time.
+  // ─── Render video ──────────────────────────────────────────────────────────
+
   Future<void> _generateVideo(CompleteParameters parameters) async {
     final stopwatch = Stopwatch()..start();
 
-    unawaited(_videoController.pause());
-    unawaited(_audioService.pause());
+    unawaited(_videoController?.pause());
+    unawaited(_audioService?.pause());
+
     final directory = await getTemporaryDirectory();
 
-    final AudioTrack? customAudioTrack = parameters.audioTracks.firstOrNull;
-    final double volumeBalance = customAudioTrack?.volumeBalance ?? 0;
+    final AudioTrack? customAudioTrack =
+        parameters.audioTracks.firstOrNull;
+    final double volumeBalance =
+        customAudioTrack?.volumeBalance ?? 0;
     double overlayVolume = 1;
     double originalVolume = 1;
     if (volumeBalance < 0) {
@@ -317,13 +371,20 @@ class _VideoEditorBasicExamplePageState
       originalVolume -= volumeBalance;
     }
 
+    final now = DateTime.now().millisecondsSinceEpoch;
     final exportModel = VideoRenderData(
       id: _taskId,
-      videoSegments: [VideoSegment(video: _video, volume: originalVolume)],
+      videoSegments: [
+        VideoSegment(video: _video!, volume: originalVolume),
+      ],
       outputFormat: _outputFormat,
       enableAudio: _proVideoController?.isAudioEnabled ?? true,
       imageLayers: parameters.layers.isNotEmpty
-          ? [ImageLayer(image: EditorLayerImage.memory(parameters.image))]
+          ? [
+              ImageLayer(
+                image: EditorLayerImage.memory(parameters.image),
+              ),
+            ]
           : null,
       blur: parameters.blur,
       colorFilters: parameters.colorFilters
@@ -345,7 +406,7 @@ class _VideoEditorBasicExamplePageState
       audioTracks: customAudioTrack != null
           ? [
               VideoAudioTrack(
-                path: (await _audioService.safeCustomAudioPath(
+                path: (await _audioService!.safeCustomAudioPath(
                   customAudioTrack,
                 ))!,
                 volume: overlayVolume,
@@ -354,10 +415,9 @@ class _VideoEditorBasicExamplePageState
           : [],
     );
 
-    final now = DateTime.now().millisecondsSinceEpoch;
     try {
       _outputPath = await ProVideoEditor.instance.renderVideoToFile(
-        '${directory.path}/my_video_$now.mp4',
+        '${directory.path}/edited_${now}.mp4',
         exportModel,
       );
     } on RenderCanceledException {
@@ -365,56 +425,100 @@ class _VideoEditorBasicExamplePageState
       _outputPath = null;
       _videoGenerationTime = Duration.zero;
       return;
+    } catch (e) {
+      stopwatch.stop();
+      _outputPath = null;
+      _videoGenerationTime = Duration.zero;
+      if (mounted) {
+        AppSnackBar.error(context, 'Render thất bại: $e');
+      }
+      return;
     }
+
     _videoGenerationTime = stopwatch.elapsed;
   }
 
-  /// Closes the video editor and opens a preview screen if a video was
-  /// exported.
-  ///
-  /// If [_outputPath] is available, it navigates to [PreviewVideo].
-  /// Afterwards, it pops the current editor page.
+  // ─── Sau khi render: preview + upload ─────────────────────────────────────
+
   void _handleCloseEditor(EditorMode editorMode) async {
     if (editorMode != EditorMode.main) return Navigator.pop(context);
 
-    if (_outputPath != null) {
+    final outputPath = _outputPath;
+
+    if (outputPath != null) {
+      // 1. Mở preview
       await Navigator.push(
         context,
         MaterialPageRoute(
           builder: (_) => PreviewVideo(
-            filePath: _outputPath!,
+            filePath: outputPath,
             generationTime: _videoGenerationTime,
           ),
         ),
       );
       _outputPath = null;
-    } else {
-      return Navigator.pop(context);
+
+      // 2. Upload lên Firebase nếu đã đăng nhập
+      if (_auth.isSignedIn) {
+        await _uploadToFirebase(outputPath);
+      } else {
+        if (mounted) {
+          AppSnackBar.warning(context, 'Đăng nhập để lưu video vào Dự án.');
+        }
+      }
+    }
+
+    if (mounted) Navigator.pop(context);
+  }
+
+  Future<void> _uploadToFirebase(String filePath) async {
+    if (!mounted) return;
+
+    AppLoadingOverlay.show(context, message: 'Đang lưu vào Dự án...');
+
+    try {
+      final title =
+          _originalFileName.split('.').first.replaceAll('_', ' ');
+
+      await _repo.saveVideo(
+        sourcePath: filePath,
+        type: 'edited',
+        title: title,
+        originalFileName: _originalFileName,
+      );
+
+      if (!mounted) return;
+      AppLoadingOverlay.hide();
+      if (!mounted) return;
+      AppSnackBar.success(context, '✅ Đã lưu vào Dự án thành công!');
+    } catch (e) {
+      if (!mounted) return;
+      AppLoadingOverlay.hide();
+      if (!mounted) return;
+      AppSnackBar.error(context, 'Lưu thất bại: $e');
     }
   }
 
+  // ─── Add clip ──────────────────────────────────────────────────────────────
+
   Future<VideoClip?> _addClip() async {
-    // Open video picker
     final result = await FilePicker.platform.pickFiles(
       type: FileType.video,
       allowMultiple: false,
     );
 
-    // User cancelled picker
     if (!mounted || result == null || result.files.isEmpty) return null;
 
     final file = result.files.single;
     final path = file.path;
     if (path == null) return null;
 
-    // Extract file name for display
-    final name = file.name;
-    final title = name.split('.').first;
+    final title = file.name.split('.').first;
     LoadingDialog.instance.show(context, configs: _configs);
-    final meta = await _proVideoEditor.getMetadata(EditorVideo.file(path));
+    final meta =
+        await _proVideoEditor.getMetadata(EditorVideo.file(path));
     LoadingDialog.instance.hide();
 
-    // Create and return your video clip
     return VideoClip(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       title: title,
@@ -423,13 +527,15 @@ class _VideoEditorBasicExamplePageState
     );
   }
 
+  // ─── Merge clips ───────────────────────────────────────────────────────────
+
   Future<void> _mergeClips(
     List<VideoClip> clips,
     void Function(double) onProgress,
   ) async {
     LoadingDialog.instance.show(context, configs: _configs);
     final directory = await getApplicationCacheDirectory();
-    final updatedFile = File('${directory.path}/temp.mp4');
+    final updatedFile = io.File('${directory.path}/temp.mp4');
 
     _updateClipsNotifier.value = true;
     await _proVideoEditor.renderVideoToFile(
@@ -451,6 +557,7 @@ class _VideoEditorBasicExamplePageState
         }).toList(),
       ),
     );
+
     if (!mounted) {
       LoadingDialog.instance.hide();
       return;
@@ -460,45 +567,81 @@ class _VideoEditorBasicExamplePageState
 
     await _setMetadata();
     await _generateThumbnails(updateClipThumbnails: false);
-    await _initializePlayer();
+    await _initializeEditor();
 
     final editor = _editorKey.currentState!;
 
-    _proVideoController =
-        ProVideoController(
+    _proVideoController = ProVideoController(
           videoPlayer: _buildVideoPlayer(),
           initialResolution: _videoMetadata.resolution,
           videoDuration: _videoMetadata.duration,
           fileSize: _videoMetadata.fileSize,
           thumbnails: _thumbnails,
-        )..initialize(
-          configsFunction: () => _configs.videoEditor,
-          callbacksAudioFunction: () =>
-              editor.audioEditorCallbacks ?? const AudioEditorCallbacks(),
-          callbacksFunction: () =>
-              editor.callbacks.videoEditorCallbacks ?? VideoEditorCallbacks(),
-        );
+        )
+      ..initialize(
+        configsFunction: () => _configs.videoEditor,
+        callbacksAudioFunction: () =>
+            editor.audioEditorCallbacks ??
+            const AudioEditorCallbacks(),
+        callbacksFunction: () =>
+            editor.callbacks.videoEditorCallbacks ??
+            VideoEditorCallbacks(),
+      );
 
-    /// Load the new video
-    final controller = VideoPlayerController.file(io.File(updatedFile.path));
+    final controller =
+        VideoPlayerController.file(io.File(updatedFile.path));
     await controller.initialize();
     LoadingDialog.instance.hide();
 
     if (!mounted) return;
 
     _videoController = controller;
-    _videoController.addListener(_onDurationChange);
+    _videoController!.addListener(_onDurationChange);
     editor.initializeVideoEditor();
 
     _updateClipsNotifier.value = false;
     setState(() {});
   }
 
+  // ─── Build ─────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
+    // Đang chọn video
+    if (_isPicking) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    // Chưa chọn được video
+    if (_video == null) {
+      return Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.video_library_outlined,
+                size: 72,
+                color: Colors.grey.shade600,
+              ),
+              const SizedBox(height: 16),
+              const Text('Không có video nào được chọn.'),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: _pickAndInit,
+                child: const Text('Chọn video'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 220),
-      child: _proVideoController == null
+      child: (!_isEditorReady || _proVideoController == null)
           ? const VideoInitializingWidget()
           : _buildEditor(),
     );
@@ -512,33 +655,33 @@ class _VideoEditorBasicExamplePageState
         onCompleteWithParameters: _generateVideo,
         onCloseEditor: _handleCloseEditor,
         videoEditorCallbacks: VideoEditorCallbacks(
-          onPause: _videoController.pause,
-          onPlay: _videoController.play,
+          onPause: () => _videoController?.pause(),
+          onPlay: () => _videoController?.play(),
           onMuteToggle: (isMuted) {
             if (isMuted) {
-              _audioService.setVolume(0);
-              _videoController.setVolume(0);
+              _audioService?.setVolume(0);
+              _videoController?.setVolume(0);
             } else {
-              _audioService.balanceAudio();
+              _audioService?.balanceAudio();
             }
           },
           onTrimSpanUpdate: (durationSpan) {
-            if (_videoController.value.isPlaying) {
+            if (_videoController?.value.isPlaying == true) {
               _proVideoController!.pause();
             }
           },
           onTrimSpanEnd: _seekToPosition,
         ),
         audioEditorCallbacks: AudioEditorCallbacks(
-          onBalanceChange: _audioService.balanceAudio,
+          onBalanceChange: _audioService!.balanceAudio,
           onStartTimeChange: (startTime) async {
-            await Future.value([
-              _audioService.seek(startTime),
-              _videoController.seekTo(Duration.zero),
+            await Future.wait([
+              _audioService!.seek(startTime),
+              _videoController!.seekTo(Duration.zero),
             ]);
           },
-          onPlay: _audioService.play,
-          onStop: (audio) => _audioService.pause(),
+          onPlay: _audioService!.play,
+          onStop: (audio) => _audioService!.pause(),
         ),
         clipsEditorCallbacks: ClipsEditorCallbacks(
           onBuildPlayer: (controller, videoClip) {
@@ -553,7 +696,6 @@ class _VideoEditorBasicExamplePageState
             if (_cachedKeyFrames.containsKey(source.id)) {
               return _cachedKeyFrames[source.id]!;
             }
-
             final result = await _proVideoEditor.getKeyFrames(
               KeyFramesConfigs(
                 video: EditorVideo.autoSource(
@@ -575,7 +717,6 @@ class _VideoEditorBasicExamplePageState
             if (_cachedKeyFrameList.containsKey(source.id)) {
               return _cachedKeyFrameList[source.id]!;
             }
-
             final result = await _proVideoEditor.getKeyFrames(
               KeyFramesConfigs(
                 video: EditorVideo.autoSource(
@@ -608,8 +749,9 @@ class _VideoEditorBasicExamplePageState
           child: isLoading
               ? const CircularProgressIndicator.adaptive()
               : AspectRatio(
-                  aspectRatio: _videoController.value.size.aspectRatio,
-                  child: VideoPlayer(_videoController),
+                  aspectRatio:
+                      _videoController!.value.size.aspectRatio,
+                  child: VideoPlayer(_videoController!),
                 ),
         );
       },

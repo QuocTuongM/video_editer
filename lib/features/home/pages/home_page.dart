@@ -1,20 +1,31 @@
 import 'dart:typed_data';
+
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:pro_image_editor/pro_image_editor.dart';
 import 'package:pro_video_editor_example/features/editor/pages/video_editor_basic_example_page.dart';
 import 'package:pro_video_editor_example/features/editor/pages/video_editor_grounded_example_page.dart';
+
+import '../../../core/services/auth_service.dart';
+import '../../../core/services/local_video_repository.dart';
+import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/app_snack_bar.dart';
+import '../../ai/pages/video_ai_page.dart';
 import '../../audio/audio_extract_example_page.dart';
+import '../../auth/pages/auth_page.dart';
 import '../../metadata/video_metadata_example_page.dart';
 import '../../render/video_renderer_page.dart';
 import '../../thumbnail/thumbnail_example_page.dart';
+import '../../upload/upload_video_page.dart';
 import '../widgets/tool_item_widget.dart';
 import 'profile_page.dart';
 import 'project_page.dart';
 
-/// Màn hình chính của ứng dụng
+/// Màn hình chính của ứng dụng.
 class HomePage extends StatefulWidget {
-  /// Khởi tạo [HomePage]
+  /// Khởi tạo [HomePage].
   const HomePage({super.key});
 
   @override
@@ -36,78 +47,136 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: _pages[_currentIndex],
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: (index) => setState(() => _currentIndex = index),
-        type: BottomNavigationBarType.fixed,
-        selectedItemColor: Colors.pinkAccent,
-        unselectedItemColor: Colors.grey,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.content_cut),
-            label: 'Chỉnh sửa',
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          border: Border(
+            top: BorderSide(
+              color: AppTheme.border.withValues(alpha: 0.5),
+            ),
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.grid_view_rounded),
-            label: 'Mẫu',
+        ),
+        child: BottomNavigationBar(
+          currentIndex: _currentIndex,
+          onTap: (index) => setState(() => _currentIndex = index),
+          type: BottomNavigationBarType.fixed,
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          selectedItemColor: AppTheme.primaryBlue,
+          unselectedItemColor: AppTheme.textSecondary,
+          selectedLabelStyle: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.auto_awesome),
-            label: 'AI Lab',
+          unselectedLabelStyle: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.folder_outlined),
-            label: 'Dự án',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person_outline),
-            label: 'Tôi',
-          ),
-        ],
+          items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.content_cut_outlined),
+              activeIcon: Icon(Icons.content_cut),
+              label: 'Chỉnh sửa',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.grid_view_outlined),
+              activeIcon: Icon(Icons.grid_view_rounded),
+              label: 'Mẫu',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.auto_awesome_outlined),
+              activeIcon: Icon(Icons.auto_awesome),
+              label: 'AI Lab',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.folder_outlined),
+              activeIcon: Icon(Icons.folder_rounded),
+              label: 'Dự án',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.person_outline),
+              activeIcon: Icon(Icons.person),
+              label: 'Tôi',
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
-/// Màn hình chỉnh sửa chính
+// ─── Main Page ──────────────────────────────────────────────────────────────
+
 class _MainPage extends StatelessWidget {
   const _MainPage();
 
-  /// Chọn ảnh từ thư viện và mở editor
   Future<void> _openImageEditor(BuildContext context) async {
     try {
       final picker = ImagePicker();
       final picked = await picker.pickImage(source: ImageSource.gallery);
       if (picked == null || !context.mounted) return;
-
       final bytes = await picked.readAsBytes();
       if (!context.mounted) return;
-
       await Navigator.push(
         context,
         MaterialPageRoute(
           builder: (_) => ProImageEditor.memory(
             bytes,
             callbacks: ProImageEditorCallbacks(
-              onImageEditingComplete: (Uint8List img) async {
+              onImageEditingComplete: (Uint8List _) async {
                 Navigator.pop(context);
               },
             ),
           ),
         ),
       );
-    } catch (e) {
+    } catch (_) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Không thể mở ảnh, thử lại!')),
-        );
+        AppSnackBar.error(context, 'Không thể mở ảnh, thử lại!');
       }
     }
+  }
+
+  void _openVideoPage(BuildContext context) {
+    if (kIsWeb) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const UploadVideoPage()),
+      );
+    } else {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const VideoEditorBasicExamplePage(),
+        ),
+      );
+    }
+  }
+
+  void _openAiLab(BuildContext context) {
+    final user = AuthService().currentUser;
+    if (user == null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const AuthPage()),
+      );
+      return;
+    }
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => const _VideoPickerForAi(),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppTheme.background,
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
@@ -123,20 +192,24 @@ class _MainPage extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.bold,
+                      color: AppTheme.textPrimary,
                     ),
                   ),
                   Row(
                     children: [
                       IconButton(
-                        icon: const Icon(Icons.search),
+                        icon: const Icon(Icons.search,
+                            color: AppTheme.textSecondary),
                         onPressed: () {},
                       ),
                       IconButton(
-                        icon: const Icon(Icons.help_outline),
+                        icon: const Icon(Icons.help_outline,
+                            color: AppTheme.textSecondary),
                         onPressed: () {},
                       ),
                       IconButton(
-                        icon: const Icon(Icons.settings_outlined),
+                        icon: const Icon(Icons.settings_outlined,
+                            color: AppTheme.textSecondary),
                         onPressed: () {},
                       ),
                     ],
@@ -151,16 +224,14 @@ class _MainPage extends StatelessWidget {
                   Expanded(
                     child: _buildMainButton(
                       context,
-                      icon: Icons.add,
+                      icon: Icons.add_rounded,
                       label: 'Video mới',
-                      color: Colors.blue.shade800,
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              const VideoEditorBasicExamplePage(),
-                        ),
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF1D4ED8), Color(0xFF2F80FF)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
                       ),
+                      onTap: () => _openVideoPage(context),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -169,7 +240,11 @@ class _MainPage extends StatelessWidget {
                       context,
                       icon: Icons.image_outlined,
                       label: 'Chỉnh sửa ảnh',
-                      color: Colors.orange.shade800,
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFFC2410C), Color(0xFFF97316)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
                       onTap: () => _openImageEditor(context),
                     ),
                   ),
@@ -177,12 +252,13 @@ class _MainPage extends StatelessWidget {
               ),
               const SizedBox(height: 24),
 
-              // Grid công cụ
+              // Section Công cụ
               const Text(
                 'Công cụ',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
+                  color: AppTheme.textPrimary,
                 ),
               ),
               const SizedBox(height: 12),
@@ -190,11 +266,11 @@ class _MainPage extends StatelessWidget {
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 crossAxisCount: 3,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
+                crossAxisSpacing: 10,
+                mainAxisSpacing: 10,
                 children: [
                   ToolItemWidget(
-                    icon: Icons.flash_on,
+                    icon: Icons.flash_on_rounded,
                     label: 'AutoCut',
                     color: Colors.orange,
                     onTap: () => Navigator.push(
@@ -206,7 +282,7 @@ class _MainPage extends StatelessWidget {
                     ),
                   ),
                   ToolItemWidget(
-                    icon: Icons.landscape_outlined,
+                    icon: Icons.info_outline_rounded,
                     label: 'Thông tin video',
                     color: Colors.blue,
                     onTap: () => Navigator.push(
@@ -217,13 +293,13 @@ class _MainPage extends StatelessWidget {
                     ),
                   ),
                   ToolItemWidget(
-                    icon: Icons.auto_awesome,
+                    icon: Icons.auto_awesome_rounded,
                     label: 'Công cụ AI',
                     color: Colors.amber,
-                    onTap: () => _openImageEditor(context),
+                    onTap: () => _openAiLab(context),
                   ),
                   ToolItemWidget(
-                    icon: Icons.tune,
+                    icon: Icons.upload_rounded,
                     label: 'Xuất video',
                     color: Colors.green,
                     onTap: () => Navigator.push(
@@ -234,7 +310,7 @@ class _MainPage extends StatelessWidget {
                     ),
                   ),
                   ToolItemWidget(
-                    icon: Icons.image_search,
+                    icon: Icons.image_search_rounded,
                     label: 'Hình thu nhỏ',
                     color: Colors.purple,
                     onTap: () => Navigator.push(
@@ -245,7 +321,7 @@ class _MainPage extends StatelessWidget {
                     ),
                   ),
                   ToolItemWidget(
-                    icon: Icons.content_cut,
+                    icon: Icons.content_cut_rounded,
                     label: 'Trình chỉnh sửa',
                     color: Colors.teal,
                     onTap: () => Navigator.push(
@@ -257,7 +333,7 @@ class _MainPage extends StatelessWidget {
                     ),
                   ),
                   ToolItemWidget(
-                    icon: Icons.audiotrack,
+                    icon: Icons.audiotrack_rounded,
                     label: 'Âm thanh',
                     color: Colors.indigo,
                     onTap: () => Navigator.push(
@@ -268,7 +344,7 @@ class _MainPage extends StatelessWidget {
                     ),
                   ),
                   ToolItemWidget(
-                    icon: Icons.image_outlined,
+                    icon: Icons.photo_outlined,
                     label: 'Chỉnh sửa ảnh',
                     color: Colors.deepPurple,
                     onTap: () => _openImageEditor(context),
@@ -286,33 +362,149 @@ class _MainPage extends StatelessWidget {
     BuildContext context, {
     required IconData icon,
     required String label,
-    required Color color,
+    required Gradient gradient,
     required VoidCallback onTap,
   }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 120,
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: color.withValues(alpha: 0.3)),
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Ink(
+          height: 110,
+          decoration: BoxDecoration(
+            gradient: gradient,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, color: Colors.white, size: 26),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
         ),
+      ),
+    );
+  }
+}
+
+// ─── AI Lab Page ────────────────────────────────────────────────────────────
+
+class _AILabPage extends StatelessWidget {
+  const _AILabPage();
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: AuthService().authStateChanges,
+      builder: (context, snapshot) {
+        final user = snapshot.data;
+
+        return Scaffold(
+          backgroundColor: AppTheme.background,
+          body: SafeArea(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
+                  child: Text(
+                    'AI Lab',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  child: Text(
+                    'Tạo title, description và hashtag cho video bằng AI.',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: user == null
+                      ? _buildLoginRequired(context)
+                      : const _VideoPickerForAi(),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildLoginRequired(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: color,
-                borderRadius: BorderRadius.circular(12),
+                color: AppTheme.primaryBlue.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
               ),
-              child: Icon(icon, color: Colors.white, size: 28),
+              child: const Icon(
+                Icons.auto_awesome_outlined,
+                size: 48,
+                color: AppTheme.primaryBlue,
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              'Đăng nhập để dùng AI Lab',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: AppTheme.textPrimary,
+              ),
             ),
             const SizedBox(height: 8),
-            Text(
-              label,
-              style: const TextStyle(fontWeight: FontWeight.w600),
+            const Text(
+              'Bạn cần đăng nhập để tạo nội dung AI cho video.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                height: 1.5,
+              ),
+            ),
+            const SizedBox(height: 24),
+            FilledButton.icon(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const AuthPage()),
+              ),
+              icon: const Icon(Icons.login),
+              label: const Text('Đăng nhập / Đăng ký'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(double.infinity, 48),
+              ),
             ),
           ],
         ),
@@ -321,13 +513,226 @@ class _MainPage extends StatelessWidget {
   }
 }
 
-/// Màn hình Mẫu
+// ─── Video Picker for AI ────────────────────────────────────────────────────
+
+/// Widget hiển thị danh sách video để chọn và mở AI Content.
+class _VideoPickerForAi extends StatelessWidget {
+  const _VideoPickerForAi();
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder(
+      stream: LocalVideoRepository().watchMyVideos(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return const Center(
+            child: Text(
+              'Không tải được dữ liệu',
+              style: TextStyle(color: AppTheme.textSecondary),
+            ),
+          );
+        }
+
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        final docs = snapshot.data!.docs;
+
+        if (docs.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surfaceSoft,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.video_library_outlined,
+                    size: 48,
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Chưa có video nào',
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Tạo video mới ở tab Chỉnh sửa trước!',
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        return ListView.separated(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+          itemCount: docs.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 10),
+          itemBuilder: (context, index) {
+            final doc = docs[index];
+            final data = doc.data();
+            final title = (data['title'] ?? 'Không có tên').toString();
+            final type = (data['type'] ?? 'original').toString();
+            final aiStatus = (data['aiContentStatus'] ?? 'idle').toString();
+            final isEdited = type == 'edited';
+
+            return Material(
+              color: AppTheme.surfaceSoft,
+              borderRadius: BorderRadius.circular(14),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: () {
+                  if (Navigator.canPop(context)) Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => VideoAiPage(
+                        videoId: doc.id,
+                        videoTitle: title,
+                      ),
+                    ),
+                  );
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 12,
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 46,
+                        height: 46,
+                        decoration: BoxDecoration(
+                          color: Colors.amber.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(
+                          Icons.auto_awesome_rounded,
+                          color: Colors.amber,
+                          size: 22,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.textPrimary,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Icon(
+                                  isEdited
+                                      ? Icons.movie_filter_outlined
+                                      : Icons.video_file_outlined,
+                                  size: 12,
+                                  color: AppTheme.textSecondary,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  isEdited ? 'Đã chỉnh' : 'Gốc',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: AppTheme.textSecondary,
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 7,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: _aiColor(aiStatus)
+                                        .withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Text(
+                                    _aiStatusText(aiStatus),
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: _aiColor(aiStatus),
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(
+                        Icons.chevron_right,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Color _aiColor(String status) {
+    switch (status) {
+      case 'done':
+        return Colors.greenAccent;
+      case 'processing':
+        return Colors.amber;
+      case 'error':
+        return Colors.red;
+      default:
+        return AppTheme.textSecondary;
+    }
+  }
+
+  String _aiStatusText(String status) {
+    switch (status) {
+      case 'done':
+        return 'Đã tạo';
+      case 'processing':
+        return 'Đang xử lý';
+      case 'error':
+        return 'Lỗi';
+      default:
+        return 'Chưa tạo';
+    }
+  }
+}
+
+// ─── Template Page ──────────────────────────────────────────────────────────
+
 class _TemplatePage extends StatelessWidget {
   const _TemplatePage();
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppTheme.background,
       body: SafeArea(
         child: Column(
           children: [
@@ -340,6 +745,7 @@ class _TemplatePage extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
+                    color: AppTheme.textPrimary,
                   ),
                 ),
               ),
@@ -347,57 +753,37 @@ class _TemplatePage extends StatelessWidget {
             Expanded(
               child: Center(
                 child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.grid_view_rounded,
-                        size: 80, color: Colors.grey.shade600),
+                    Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: AppTheme.surfaceSoft,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.grid_view_rounded,
+                        size: 48,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
                     const SizedBox(height: 16),
-                    Text('Chưa có mẫu nào',
-                        style: TextStyle(color: Colors.grey.shade600)),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Màn hình AI Lab
-class _AILabPage extends StatelessWidget {
-  const _AILabPage();
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
-        child: Column(
-          children: [
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'AI Lab',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ),
-            Expanded(
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.auto_awesome,
-                        size: 80, color: Colors.grey.shade600),
-                    const SizedBox(height: 16),
-                    Text('Tính năng AI sắp ra mắt!',
-                        style: TextStyle(color: Colors.grey.shade600)),
+                    const Text(
+                      'Sắp ra mắt',
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Tính năng mẫu video đang được phát triển.',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 13,
+                      ),
+                    ),
                   ],
                 ),
               ),

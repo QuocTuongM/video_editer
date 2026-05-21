@@ -10,6 +10,8 @@ import 'package:pro_video_editor/pro_video_editor.dart';
 import 'package:wav/wav.dart';
 
 import '/core/constants/example_constants.dart';
+import '/core/theme/app_theme.dart';
+import '/shared/widgets/app_snack_bar.dart';
 
 /// A sample page demonstrating audio extraction from video files.
 ///
@@ -142,12 +144,7 @@ class _AudioExtractExamplePageState extends State<AudioExtractExamplePage> {
           }
         }
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Audio extracted successfully!\n$info'),
-            backgroundColor: Colors.green,
-          ),
-        );
+        AppSnackBar.success(context, 'Xuất âm thanh thành công! $info');
       }
     } catch (e) {
       setState(() {
@@ -155,12 +152,7 @@ class _AudioExtractExamplePageState extends State<AudioExtractExamplePage> {
       });
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error extracting audio: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        AppSnackBar.error(context, 'Lỗi xuất âm thanh: $e');
       }
     }
   }
@@ -219,14 +211,9 @@ class _AudioExtractExamplePageState extends State<AudioExtractExamplePage> {
       });
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Demo video has audio: $hasAudio\nMuted video has audio: '
-              '$mutedHasAudio',
-            ),
-            backgroundColor: Colors.blue,
-          ),
+        AppSnackBar.info(
+          context,
+          'Video demo có âm thanh: $hasAudio — Video tắt tiếng: $mutedHasAudio',
         );
       }
     } catch (e) {
@@ -235,12 +222,7 @@ class _AudioExtractExamplePageState extends State<AudioExtractExamplePage> {
       });
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error checking audio track: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        AppSnackBar.error(context, 'Lỗi kiểm tra âm thanh: $e');
       }
     }
   }
@@ -277,14 +259,9 @@ class _AudioExtractExamplePageState extends State<AudioExtractExamplePage> {
       });
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Waveform generated: ${waveform.sampleCount} samples, '
-              '${waveform.isStereo ? "stereo" : "mono"}',
-            ),
-            backgroundColor: Colors.green,
-          ),
+        AppSnackBar.success(
+          context,
+          'Đã tạo dạng sóng: \${waveform.sampleCount} mẫu, \${waveform.isStereo ? "stereo" : "mono"}',
         );
       }
     } catch (e) {
@@ -293,12 +270,7 @@ class _AudioExtractExamplePageState extends State<AudioExtractExamplePage> {
       });
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error generating waveform: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        AppSnackBar.error(context, 'Lỗi tạo dạng sóng: $e');
       }
     }
   }
@@ -359,7 +331,8 @@ class _AudioExtractExamplePageState extends State<AudioExtractExamplePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Audio Extraction')),
+      backgroundColor: AppTheme.background,
+      appBar: AppBar(title: const Text('Xuất âm thanh'), backgroundColor: AppTheme.background),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
         children: [
@@ -411,12 +384,7 @@ class _AudioExtractExamplePageState extends State<AudioExtractExamplePage> {
                 _isStreamingComplete = true;
               });
               if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Streaming waveform complete!'),
-                    backgroundColor: Colors.green,
-                  ),
-                );
+                AppSnackBar.success(context, 'Phát trực tuyến dạng sóng hoàn thành!');
               }
             },
           ),
@@ -473,17 +441,17 @@ class _AudioExtractionCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Audio Extraction',
+              'Xuất âm thanh',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             const Text(
-              'Select format and extract audio from video',
+              'Chọn định dạng và xuất âm thanh từ video',
               style: TextStyle(fontSize: 12, color: Colors.grey),
             ),
             const SizedBox(height: 16),
             const Text(
-              'Format:',
+              'Định dạng:',
               style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
             ),
             const SizedBox(height: 8),
@@ -493,7 +461,7 @@ class _AudioExtractionCard extends StatelessWidget {
                 final isSupported = isFormatSupported(format);
                 return Tooltip(
                   message: isSupported
-                      ? 'Supported on this platform'
+                      ? 'Hỗ trợ trên thiết bị này'
                       : 'Not supported on ${Platform.operatingSystem}',
                   child: ChoiceChip(
                     label: Text(format.name.toUpperCase()),
@@ -519,7 +487,7 @@ class _AudioExtractionCard extends StatelessWidget {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.audiotrack),
-                label: Text(isExtracting ? 'Extracting...' : 'Extract Audio'),
+                label: Text(isExtracting ? 'Đang xuất...' : 'Xuất âm thanh'),
               ),
             ),
             if (isExtracting) ...[
@@ -535,7 +503,7 @@ class _AudioExtractionCard extends StatelessWidget {
               const Divider(),
               const SizedBox(height: 12),
               const Text(
-                'Extracted Audio',
+                'Âm thanh đã xuất',
                 style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
               ),
               const SizedBox(height: 12),
@@ -578,7 +546,7 @@ class _AudioExtractionCard extends StatelessWidget {
                 child: OutlinedButton.icon(
                   onPressed: onDelete,
                   icon: const Icon(Icons.delete, size: 18),
-                  label: const Text('Delete'),
+                  label: const Text('Xóa'),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: Colors.red,
                     side: const BorderSide(color: Colors.red),
@@ -615,12 +583,12 @@ class _AudioTrackDetectionCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Audio Track Detection',
+              'Kiểm tra rãnh âm thanh',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             const Text(
-              'Check if videos have audio tracks before extraction',
+              'Kiểm tra xem video có âm thanh trước khi xuất',
               style: TextStyle(fontSize: 12, color: Colors.grey),
             ),
             const SizedBox(height: 16),
@@ -636,7 +604,7 @@ class _AudioTrackDetectionCard extends StatelessWidget {
                       )
                     : const Icon(Icons.music_note),
                 label: Text(
-                  isCheckingAudio ? 'Checking...' : 'Check Audio Tracks',
+                  isCheckingAudio ? 'Đang kiểm tra...' : 'Kiểm tra âm thanh',
                 ),
               ),
             ),
@@ -682,7 +650,7 @@ class _AudioTrackResultRow extends StatelessWidget {
         const SizedBox(width: 8),
         Expanded(child: Text(label)),
         Text(
-          hasAudio ? 'Has audio' : 'No audio',
+          hasAudio ? 'Có âm thanh' : 'Không có âm thanh',
           style: TextStyle(
             fontWeight: FontWeight.bold,
             color: hasAudio ? Colors.green : Colors.red,
@@ -734,17 +702,17 @@ class _WaveformGenerationCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Waveform Generation',
+              'Tạo dạng sóng',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             const Text(
-              'Generate visual waveform data from video audio',
+              'Tạo dữ liệu dạng sóng hình ảnh từ âm thanh video',
               style: TextStyle(fontSize: 12, color: Colors.grey),
             ),
             const SizedBox(height: 16),
             const Text(
-              'Resolution:',
+              'Độ phân giải:',
               style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
             ),
             const SizedBox(height: 8),
@@ -767,9 +735,9 @@ class _WaveformGenerationCard extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             SwitchListTile(
-              title: const Text('Streaming Mode'),
+              title: const Text('Chế độ phát trực tuyến'),
               subtitle: const Text(
-                'Progressive waveform updates',
+                'Cập nhật dạng sóng liên tục',
                 style: TextStyle(fontSize: 12),
               ),
               value: useStreamingMode,
@@ -808,11 +776,11 @@ class _WaveformGenerationCard extends StatelessWidget {
                     label: Text(
                       _isProcessing
                           ? (streamingConfig != null
-                                ? 'Streaming...'
-                                : 'Generating...')
+                                ? 'Đang phát...'
+                                : 'Đang tạo...')
                           : (useStreamingMode
-                                ? 'Stream Waveform'
-                                : 'Generate Waveform'),
+                                ? 'Phát dạng sóng'
+                                : 'Tạo dạng sóng'),
                     ),
                   ),
                 ),
@@ -821,7 +789,7 @@ class _WaveformGenerationCard extends StatelessWidget {
                   IconButton(
                     onPressed: onCancelStreaming,
                     icon: const Icon(Icons.cancel),
-                    tooltip: 'Cancel',
+                    tooltip: 'Hủy',
                     color: Colors.red,
                   ),
                 ],
@@ -858,7 +826,7 @@ class _StreamingWaveformPreviewState extends State<_StreamingWaveformPreview> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          'Streaming waveform...',
+          'Đang tạo dạng sóng...',
           style: TextStyle(fontSize: 12, color: Colors.grey),
         ),
         const SizedBox(height: 8),
@@ -959,7 +927,7 @@ class _WaveformDisplayState extends State<_WaveformDisplay> {
         if (widget.waveformData.isStereo) ...[
           const SizedBox(height: 8),
           const Text(
-            'Left Channel (top) / Right Channel (bottom)',
+            'Kênh trái (trên) / Kênh phải (dưới)',
             style: TextStyle(fontSize: 10, color: Colors.grey),
             textAlign: TextAlign.center,
           ),
