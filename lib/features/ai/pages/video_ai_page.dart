@@ -159,6 +159,7 @@ class _VideoAiPageState extends State<VideoAiPage>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(
         title: const Text('AI Content'),
         backgroundColor: AppTheme.background,

@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 
 import 'core/theme/app_theme.dart';
-import 'features/home/pages/home_page.dart';
+import 'features/home/widgets/splash_screen.dart';
 import 'firebase_options.dart';
 
 /// Entry point của ứng dụng.
@@ -35,10 +35,10 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Video Editor',
+      title: 'Pro Video Editor',
       theme: AppTheme.dark(),
       debugShowCheckedModeBanner: false,
-      home: const HomePage(),
+      home: const SplashScreen(),
     );
   }
 }

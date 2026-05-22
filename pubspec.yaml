@@ -44,6 +44,15 @@ dependencies:
   # HTTP cho Gemini API
   http: ^1.2.0
 
+  # Lưu ảnh vào thư viện
+  gal: ^2.3.0
+
+  # Thông tin ứng dụng
+  package_info_plus: ^8.0.0
+
+  # Chia sẻ
+  share_plus: ^10.0.0
+
 dev_dependencies:
   integration_test:
     sdk: flutter

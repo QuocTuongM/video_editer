@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-/// A widget that displays a initializing screen when the video editor startup.
+/// Widget hiển thị màn hình khởi động khi editor đang tải.
 class VideoInitializingWidget extends StatelessWidget {
-  /// Creates a [VideoInitializingWidget] widget.
+  /// Khởi tạo [VideoInitializingWidget].
   const VideoInitializingWidget({super.key});
 
   @override
@@ -27,7 +27,7 @@ class VideoInitializingWidget extends StatelessWidget {
                 color: Colors.white70,
               ),
               Text(
-                'Initializing Video-Editor...',
+                'Đang khởi động trình chỉnh sửa...',
                 style: TextStyle(
                   fontSize: 18,
                   color: Colors.white70,

@@ -1,4 +1,6 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/services/auth_service.dart';
@@ -11,20 +13,26 @@ import '../../editor/widgets/preview_video.dart';
 /// Màn hình danh sách dự án.
 class ProjectPage extends StatefulWidget {
   /// Khởi tạo [ProjectPage].
-  const ProjectPage({super.key});
+  const ProjectPage({super.key, this.searchController});
+
+  /// Controller tìm kiếm từ bên ngoài (tuỳ chọn).
+  final TextEditingController? searchController;
 
   @override
   State<ProjectPage> createState() => _ProjectPageState();
 }
 
 class _ProjectPageState extends State<ProjectPage> {
-  final _searchController = TextEditingController();
+  late final TextEditingController _searchController =
+      widget.searchController ?? TextEditingController();
   String _searchQuery = '';
   String _filterType = 'all';
+  bool _sortNewest = true;
 
   @override
   void dispose() {
-    _searchController.dispose();
+    // Chỉ dispose nếu tự tạo
+    if (widget.searchController == null) _searchController.dispose();
     super.dispose();
   }
 
@@ -41,11 +49,25 @@ class _ProjectPageState extends State<ProjectPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
-                  child: Text(
-                    'Dự án của tôi',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 8, 8),
+                  child: Row(
+                    children: [
+                      const Text(
+                        'Dự án của tôi',
+                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        icon: Icon(
+                          _sortNewest ? Icons.arrow_downward_rounded : Icons.arrow_upward_rounded,
+                          size: 20,
+                          color: Colors.grey,
+                        ),
+                        tooltip: _sortNewest ? 'Mới nhất' : 'Cũ nhất',
+                        onPressed: () => setState(() => _sortNewest = !_sortNewest),
+                      ),
+                    ],
                   ),
                 ),
                 Padding(
@@ -83,13 +105,16 @@ class _ProjectPageState extends State<ProjectPage> {
                     ),
                   ),
                 ),
-                Padding(
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                   child: Row(
                     children: [
-                      _filterChip('Tất cả', 'all', Icons.video_library_outlined),
+                      _filterChip('Tất cả', 'all', Icons.perm_media_outlined),
                       const SizedBox(width: 8),
-                      _filterChip('Gốc', 'original', Icons.video_file_outlined),
+                      _filterChip('Video', 'video', Icons.video_file_outlined),
+                      const SizedBox(width: 8),
+                      _filterChip('Ảnh', 'image', Icons.image_outlined),
                       const SizedBox(width: 8),
                       _filterChip('Đã chỉnh', 'edited', Icons.movie_filter_outlined),
                     ],
@@ -209,7 +234,11 @@ class _ProjectPageState extends State<ProjectPage> {
           final data = doc.data();
           final title = (data['title'] ?? '').toString().toLowerCase();
           final type = (data['type'] ?? 'original').toString();
-          final matchType = _filterType == 'all' || _filterType == type;
+          final mediaType = (data['mediaType'] ?? 'video').toString();
+          final matchType = _filterType == 'all' ||
+              _filterType == type ||
+              (_filterType == 'video' && mediaType == 'video') ||
+              (_filterType == 'image' && mediaType == 'image');
           final matchSearch = _searchQuery.isEmpty ||
               title.contains(_searchQuery.toLowerCase());
           return matchType && matchSearch;
@@ -262,8 +291,8 @@ class _ProjectPageState extends State<ProjectPage> {
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: Text(
                 _searchQuery.isNotEmpty || _filterType != 'all'
-                    ? '${filteredDocs.length} / ${allDocs.length} video'
-                    : '${allDocs.length} video',
+                    ? '\${filteredDocs.length} / \${allDocs.length} mục'
+                    : '\${allDocs.length} mục',
                 style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
               ),
             ),
@@ -300,6 +329,7 @@ class _ProjectPageState extends State<ProjectPage> {
                     child: _VideoCard(
                       title: title,
                       type: type,
+                      mediaType: (data['mediaType'] ?? 'video').toString(),
                       sizeBytes: sizeBytes,
                       durationMs: durationMs,
                       aiStatus: aiStatus,
@@ -311,6 +341,10 @@ class _ProjectPageState extends State<ProjectPage> {
                           builder: (_) => VideoAiPage(videoId: doc.id, videoTitle: title),
                         ),
                       ),
+                      onShare: downloadUrl.isNotEmpty
+                          ? () => _shareVideo(downloadUrl, title)
+                          : null,
+                      onRename: () => _renameItem(context, doc.id, title),
                     ),
                   );
                 },
@@ -320,6 +354,66 @@ class _ProjectPageState extends State<ProjectPage> {
         );
       },
     );
+  }
+
+  void _shareVideo(String url, String title) {
+    Share.share(
+      'Đây là video "\$title" của tôi: \$url',
+      subject: title,
+    );
+  }
+
+  Future<void> _renameItem(
+    BuildContext context,
+    String docId,
+    String currentTitle,
+  ) async {
+    final controller = TextEditingController(text: currentTitle);
+    final newTitle = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF111827),
+        title: const Text('Đổi tên', style: TextStyle(color: Colors.white)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: const TextStyle(color: Colors.white),
+          decoration: const InputDecoration(
+            hintText: 'Nhập tên mới',
+          ),
+          onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Hủy'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Lưu'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+
+    if (newTitle == null || newTitle.isEmpty || newTitle == currentTitle) return;
+
+    try {
+      final user = AuthService().currentUser;
+      if (user == null) return;
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('videos')
+          .doc(docId)
+          .update({'title': newTitle, 'updatedAt': FieldValue.serverTimestamp()});
+      if (!context.mounted) return;
+      AppSnackBar.success(context, 'Đã đổi tên thành công!');
+    } catch (e) {
+      if (!context.mounted) return;
+      AppSnackBar.error(context, 'Lỗi: \$e');
+    }
   }
 
   Future<void> _openVideo(BuildContext context, String downloadUrl) async {
@@ -369,27 +463,39 @@ class _VideoCard extends StatelessWidget {
   const _VideoCard({
     required this.title,
     required this.type,
+    required this.mediaType,
     required this.sizeBytes,
     required this.durationMs,
     required this.aiStatus,
     required this.searchQuery,
     required this.onTap,
     required this.onAiTap,
+    this.onShare,
+    this.onRename,
   });
 
   final String title;
   final String type;
+  final String mediaType;
   final int sizeBytes;
   final int? durationMs;
   final String aiStatus;
   final String searchQuery;
   final VoidCallback onTap;
   final VoidCallback onAiTap;
+  final VoidCallback? onShare;
+  final VoidCallback? onRename;
+
+  bool get _isImage => mediaType == 'image';
 
   @override
   Widget build(BuildContext context) {
     final isEdited = type == 'edited';
-    final color = isEdited ? Colors.teal : Colors.blue;
+    final color = _isImage
+        ? Colors.deepPurple
+        : isEdited
+            ? Colors.teal
+            : Colors.blue;
 
     return Container(
       decoration: BoxDecoration(
@@ -414,8 +520,13 @@ class _VideoCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(14),
                     ),
                     child: Icon(
-                      isEdited ? Icons.movie_filter_outlined : Icons.video_file_outlined,
-                      color: color, size: 28,
+                      _isImage
+                          ? Icons.image_outlined
+                          : isEdited
+                              ? Icons.movie_filter_outlined
+                              : Icons.video_file_outlined,
+                      color: color,
+                      size: 28,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -433,8 +544,16 @@ class _VideoCard extends StatelessWidget {
                               _chip(Icons.timer_outlined,
                                   '${(durationMs! / 1000).toStringAsFixed(1)}s'),
                             _chip(
-                              isEdited ? Icons.movie_filter_outlined : Icons.video_file_outlined,
-                              isEdited ? 'Đã chỉnh' : 'Gốc',
+                              _isImage
+                                  ? Icons.image_outlined
+                                  : isEdited
+                                      ? Icons.movie_filter_outlined
+                                      : Icons.video_file_outlined,
+                              _isImage
+                                  ? 'Ảnh'
+                                  : isEdited
+                                      ? 'Đã chỉnh'
+                                      : 'Gốc',
                               color: color,
                             ),
                           ],
@@ -442,33 +561,57 @@ class _VideoCard extends StatelessWidget {
                       ],
                     ),
                   ),
-                  Icon(Icons.play_circle_outline, color: Colors.grey.shade600),
-                ],
-              ),
-            ),
-          ),
-          Divider(height: 1, color: color.withValues(alpha: 0.15)),
-          InkWell(
-            onTap: onAiTap,
-            borderRadius: const BorderRadius.vertical(bottom: Radius.circular(16)),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              child: Row(
-                children: [
-                  Icon(Icons.auto_awesome_rounded, size: 16, color: _aiColor(aiStatus)),
-                  const SizedBox(width: 8),
-                  Text(
-                    'AI Content — ${_aiStatusText(aiStatus)}',
-                    style: TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w600, color: _aiColor(aiStatus),
-                    ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (onShare != null)
+                        IconButton(
+                          icon: const Icon(Icons.share_outlined, size: 18),
+                          color: Colors.grey,
+                          tooltip: 'Chia sẻ',
+                          onPressed: onShare,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                        ),
+                      IconButton(
+                        icon: const Icon(Icons.edit_outlined, size: 18),
+                        color: Colors.grey,
+                        tooltip: 'Đổi tên',
+                        onPressed: onRename,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                      ),
+                      Icon(Icons.play_circle_outline, color: Colors.grey.shade600),
+                    ],
                   ),
-                  const Spacer(),
-                  Icon(Icons.chevron_right, size: 18, color: Colors.grey.shade600),
                 ],
               ),
             ),
           ),
+          if (!_isImage) ...[
+            Divider(height: 1, color: color.withValues(alpha: 0.15)),
+            InkWell(
+              onTap: onAiTap,
+              borderRadius: const BorderRadius.vertical(bottom: Radius.circular(16)),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                child: Row(
+                  children: [
+                    Icon(Icons.auto_awesome_rounded, size: 16, color: _aiColor(aiStatus)),
+                    const SizedBox(width: 8),
+                    Text(
+                      'AI Content — \${_aiStatusText(aiStatus)}',
+                      style: TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w600, color: _aiColor(aiStatus),
+                      ),
+                    ),
+                    const Spacer(),
+                    Icon(Icons.chevron_right, size: 18, color: Colors.grey.shade600),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );

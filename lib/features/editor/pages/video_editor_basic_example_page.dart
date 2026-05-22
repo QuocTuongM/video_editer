@@ -17,6 +17,7 @@ import '/core/services/auth_service.dart';
 import '/core/services/local_video_repository.dart';
 import '/shared/widgets/app_loading_overlay.dart';
 import '/shared/widgets/app_snack_bar.dart';
+import '/shared/widgets/upload_progress_dialog.dart';
 import '../widgets/clips_previewer.dart';
 import '../widgets/preview_video.dart';
 import '../widgets/video_initializing_widget.dart';
@@ -474,28 +475,20 @@ class _VideoEditorBasicExamplePageState
   Future<void> _uploadToFirebase(String filePath) async {
     if (!mounted) return;
 
-    AppLoadingOverlay.show(context, message: 'Đang lưu vào Dự án...');
+    final title =
+        _originalFileName.split('.').first.replaceAll('_', ' ');
 
-    try {
-      final title =
-          _originalFileName.split('.').first.replaceAll('_', ' ');
+    final result = await UploadProgressDialog.uploadVideo(
+      context: context,
+      sourcePath: filePath,
+      type: 'edited',
+      title: title,
+      originalFileName: _originalFileName,
+    );
 
-      await _repo.saveVideo(
-        sourcePath: filePath,
-        type: 'edited',
-        title: title,
-        originalFileName: _originalFileName,
-      );
-
-      if (!mounted) return;
-      AppLoadingOverlay.hide();
-      if (!mounted) return;
+    if (!mounted) return;
+    if (result != null) {
       AppSnackBar.success(context, '✅ Đã lưu vào Dự án thành công!');
-    } catch (e) {
-      if (!mounted) return;
-      AppLoadingOverlay.hide();
-      if (!mounted) return;
-      AppSnackBar.error(context, 'Lưu thất bại: $e');
     }
   }
 

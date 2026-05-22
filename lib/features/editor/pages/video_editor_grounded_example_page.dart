@@ -18,6 +18,11 @@ import 'package:pro_video_editor_example/features/editor/services/audio_helper_s
 import 'package:video_player/video_player.dart';
 
 import '/core/constants/example_constants.dart';
+import '/core/services/auth_service.dart';
+import '/core/services/local_video_repository.dart';
+import '/shared/widgets/app_loading_overlay.dart';
+import '/shared/widgets/app_snack_bar.dart';
+import '/shared/widgets/upload_progress_dialog.dart';
 import '/features/editor/widgets/video_initializing_widget.dart';
 import '../widgets/clips_previewer.dart';
 import '../widgets/demo_build_stickers.dart';
@@ -69,6 +74,8 @@ class _VideoEditorGroundedExamplePageState
 
   /// The video currently loaded in the editor.
   EditorVideo _video = EditorVideo.asset(kVideoEditorExampleH264Path);
+  String _videoName = 'video.mp4';
+  bool _isVideoSelected = false;
 
   String? _outputPath;
 
@@ -158,7 +165,7 @@ class _VideoEditorGroundedExamplePageState
                 configs: editorState.configs,
                 callbacks: editorState.callbacks,
                 editor: editorState,
-                i18nColor: 'Color',
+                i18nColor: 'Màu',
                 showColorPicker: (currentColor) {
                   Color? newColor;
                   showDialog(
@@ -174,7 +181,7 @@ class _VideoEditorGroundedExamplePageState
                       ),
                       actions: <Widget>[
                         ElevatedButton(
-                          child: const Text('Got it'),
+                          child: const Text('Xong'),
                           onPressed: () {
                             if (newColor != null) {
                               setState(() => editorState.setColor(newColor!));
@@ -221,7 +228,7 @@ class _VideoEditorGroundedExamplePageState
                 configs: editorState.configs,
                 callbacks: editorState.callbacks,
                 editor: editorState,
-                i18nColor: 'Color',
+                i18nColor: 'Màu',
                 showColorPicker: (currentColor) {
                   Color? newColor;
                   showDialog(
@@ -237,7 +244,7 @@ class _VideoEditorGroundedExamplePageState
                       ),
                       actions: <Widget>[
                         ElevatedButton(
-                          child: const Text('Got it'),
+                          child: const Text('Xong'),
                           onPressed: () {
                             if (newColor != null) {
                               setState(
@@ -376,10 +383,13 @@ class _VideoEditorGroundedExamplePageState
     ),
     i18n: const I18n(
       paintEditor: I18nPaintEditor(
-        changeOpacity: 'Opacity',
-        lineWidth: 'Thickness',
+        changeOpacity: 'Độ mờ',
+        lineWidth: 'Độ dày',
       ),
-      textEditor: I18nTextEditor(backgroundMode: 'Mode', textAlign: 'Align'),
+      textEditor: I18nTextEditor(
+        backgroundMode: 'Nền',
+        textAlign: 'Căn chỉnh',
+      ),
     ),
     stickerEditor: StickerEditorConfigs(
       builder: (setLayer, scrollController) => DemoBuildStickers(
@@ -450,7 +460,7 @@ class _VideoEditorGroundedExamplePageState
       clips: [
         VideoClip(
           id: '001',
-          title: 'My awesome video',
+          title: 'Video của tôi',
           // subtitle: 'Optional',
           duration: Duration.zero,
           clip: EditorVideoClip.autoSource(
@@ -481,7 +491,7 @@ class _VideoEditorGroundedExamplePageState
   @override
   void initState() {
     super.initState();
-    _initializePlayer();
+    // Video sẽ được load sau khi user chọn file
   }
 
   @override
@@ -546,6 +556,23 @@ class _VideoEditorGroundedExamplePageState
     }
   }
 
+
+  Future<void> _pickAndLoadVideo() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.video,
+      allowMultiple: false,
+      withData: false,
+    );
+    if (result == null || result.files.isEmpty || !mounted) return;
+    final file = result.files.single;
+    final path = file.path;
+    if (path == null) return;
+    _video = EditorVideo.file(io.File(path));
+    _videoName = file.name;
+    setState(() => _isVideoSelected = true);
+    await _initializePlayer();
+  }
+
   Future<void> _initializePlayer() async {
     await _setMetadata();
 
@@ -555,7 +582,9 @@ class _VideoEditorGroundedExamplePageState
       _generateThumbnails();
     });
 
-    _videoController = VideoPlayerController.asset(kVideoEditorExampleH264Path);
+    _videoController = _video.file != null
+        ? VideoPlayerController.file(io.File(_video.file!.path))
+        : VideoPlayerController.asset(kVideoEditorExampleH264Path);
 
     await Future.wait([
       _videoController.initialize(),
@@ -690,9 +719,32 @@ class _VideoEditorGroundedExamplePageState
           ),
         ),
       );
+      // Upload lên Firebase nếu đã đăng nhập
+      if (_outputPath != null) await _uploadToFirebase(_outputPath!);
       _outputPath = null;
     } else {
       return Navigator.pop(context);
+    }
+  }
+
+  Future<void> _uploadToFirebase(String filePath) async {
+    final user = AuthService().currentUser;
+    if (user == null) return; // Chưa đăng nhập thì bỏ qua
+    if (!mounted) return;
+
+    final title = _videoName.split('.').first.replaceAll('_', ' ');
+
+    final result = await UploadProgressDialog.uploadVideo(
+      context: context,
+      sourcePath: filePath,
+      type: 'edited',
+      title: title.isNotEmpty ? title : 'Video đã chỉnh sửa',
+      originalFileName: _videoName,
+    );
+
+    if (!mounted) return;
+    if (result != null) {
+      AppSnackBar.success(context, '✅ Đã lưu vào Dự án thành công!');
     }
   }
 
@@ -804,6 +856,62 @@ class _VideoEditorGroundedExamplePageState
 
   @override
   Widget build(BuildContext context) {
+    if (!_isVideoSelected) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF0B0F1A),
+        appBar: AppBar(
+          title: const Text('Chỉnh sửa Pro'),
+          backgroundColor: const Color(0xFF0B0F1A),
+          foregroundColor: Colors.white,
+        ),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(24),
+                decoration: const BoxDecoration(
+                  color: Color(0xFF1A2035),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.video_library_outlined,
+                  size: 64,
+                  color: Color(0xFF2F80FF),
+                ),
+              ),
+              const SizedBox(height: 24),
+              const Text(
+                'Chọn video để chỉnh sửa',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Chọn video từ thư viện điện thoại',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Color(0xFF94A3B8),
+                ),
+              ),
+              const SizedBox(height: 32),
+              FilledButton.icon(
+                onPressed: _pickAndLoadVideo,
+                icon: const Icon(Icons.photo_library_outlined),
+                label: const Text('Chọn video từ thư viện'),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(260, 52),
+                  backgroundColor: const Color(0xFF2F80FF),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 220),
       child: _proVideoController == null

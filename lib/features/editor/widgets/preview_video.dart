@@ -8,7 +8,11 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:pro_image_editor/pro_image_editor.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
 
+import '/core/services/auth_service.dart';
+import '/core/services/local_video_repository.dart';
 import '/features/editor/widgets/pixel_transparent_painter.dart';
+import '/shared/widgets/app_loading_overlay.dart';
+import '/shared/widgets/app_snack_bar.dart';
 
 /// A widget that previews a video from a local file path or remote URL.
 ///
@@ -87,6 +91,37 @@ class _PreviewVideoState extends State<PreviewVideo> {
     return '${size.toStringAsFixed(decimals)} ${suffixes[i]}';
   }
 
+  Future<void> _saveToProject(BuildContext context) async {
+    final user = AuthService().currentUser;
+    if (user == null) {
+      AppSnackBar.warning(context, 'Đăng nhập để lưu vào Dự án!');
+      return;
+    }
+
+    if (_isRemoteUrl) {
+      AppSnackBar.info(context, 'Video đã lưu trong Dự án rồi!');
+      return;
+    }
+
+    AppLoadingOverlay.show(context, message: 'Đang lưu vào Dự án...');
+    try {
+      final fileName = widget.filePath.split('/').last;
+      await LocalVideoRepository().saveVideo(
+        sourcePath: widget.filePath,
+        type: 'edited',
+        title: 'Video xuất ${DateTime.now().day}/${DateTime.now().month}',
+        originalFileName: fileName,
+      );
+      AppLoadingOverlay.hide();
+      if (!context.mounted) return;
+      AppSnackBar.success(context, '✅ Đã lưu vào Dự án!');
+    } catch (e) {
+      AppLoadingOverlay.hide();
+      if (!context.mounted) return;
+      AppSnackBar.error(context, 'Lưu thất bại: \$e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
@@ -94,7 +129,17 @@ class _PreviewVideoState extends State<PreviewVideo> {
         return Theme(
           data: Theme.of(context),
           child: Scaffold(
-            appBar: AppBar(title: const Text('Xem trước')),
+            appBar: AppBar(
+              title: const Text('Xem trước'),
+              actions: [
+                if (!_isRemoteUrl)
+                  IconButton(
+                    icon: const Icon(Icons.save_alt_rounded),
+                    tooltip: 'Lưu vào Dự án',
+                    onPressed: () => _saveToProject(context),
+                  ),
+              ],
+            ),
             body: CustomPaint(
               painter: const PixelTransparentPainter(
                 primary: Color.fromARGB(255, 17, 17, 17),
@@ -119,8 +164,8 @@ class _PreviewVideoState extends State<PreviewVideo> {
     return FutureBuilder<VideoMetadata>(
       future: _videoMetadata,
       builder: (context, snapshot) {
-        final aspectRatio =
-            snapshot.data?.resolution.aspectRatio ?? 1;
+        final rawRatio = snapshot.data?.resolution.aspectRatio ?? 1.0;
+        final aspectRatio = (rawRatio > 0) ? rawRatio : 16.0 / 9.0;
         final rotation = snapshot.data?.rotation ?? 0;
 
         final convertedRotation = rotation % 360;

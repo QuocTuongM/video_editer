@@ -39,10 +39,8 @@ linter:
     - await_only_futures
     - camel_case_types
     - cancel_subscriptions
-    - cascade_invocations
     - constant_identifier_names
     - control_flow_in_finally
-    - directives_ordering
     - empty_catches
     - empty_constructor_bodies
     - empty_statements
@@ -64,7 +62,6 @@ linter:
     - prefer_conditional_assignment
     - prefer_const_constructors
     - prefer_contains
-    - prefer_final_fields
     - prefer_initializing_formals
     - prefer_interpolation_to_compose_strings
     - prefer_is_empty
@@ -79,7 +76,6 @@ linter:
     - type_init_formals
     - unnecessary_const
     - unnecessary_getters_setters
-    - unnecessary_lambdas
     - unnecessary_new
     - unnecessary_null_aware_assignments
     - unnecessary_statements

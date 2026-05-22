@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:gal/gal.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:pro_image_editor/pro_image_editor.dart';
 import 'package:pro_video_editor_example/features/editor/pages/video_editor_basic_example_page.dart';
@@ -22,6 +23,7 @@ import '../../upload/upload_video_page.dart';
 import '../widgets/tool_item_widget.dart';
 import 'profile_page.dart';
 import 'project_page.dart';
+import 'settings_page.dart';
 
 /// Màn hình chính của ứng dụng.
 class HomePage extends StatefulWidget {
@@ -34,14 +36,30 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   int _currentIndex = 0;
+  final _projectSearchController = TextEditingController();
 
-  final List<Widget> _pages = [
-    const _MainPage(),
+  late final List<Widget> _pages = [
+    _MainPage(onSearchTap: _goToProjectSearch),
     const _TemplatePage(),
     const _AILabPage(),
-    const ProjectPage(),
+    ProjectPage(searchController: _projectSearchController),
     const ProfilePage(),
   ];
+
+  @override
+  void dispose() {
+    _projectSearchController.dispose();
+    super.dispose();
+  }
+
+  void _goToProjectSearch() {
+    setState(() => _currentIndex = 3);
+    Future.delayed(const Duration(milliseconds: 100), () {
+      _projectSearchController.selection = TextSelection.fromPosition(
+        TextPosition(offset: _projectSearchController.text.length),
+      );
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -108,7 +126,8 @@ class _HomePageState extends State<HomePage> {
 // ─── Main Page ──────────────────────────────────────────────────────────────
 
 class _MainPage extends StatelessWidget {
-  const _MainPage();
+  const _MainPage({this.onSearchTap});
+  final VoidCallback? onSearchTap;
 
   Future<void> _openImageEditor(BuildContext context) async {
     try {
@@ -117,22 +136,66 @@ class _MainPage extends StatelessWidget {
       if (picked == null || !context.mounted) return;
       final bytes = await picked.readAsBytes();
       if (!context.mounted) return;
+
+      Uint8List? editedBytes;
+
       await Navigator.push(
         context,
         MaterialPageRoute(
           builder: (_) => ProImageEditor.memory(
             bytes,
             callbacks: ProImageEditorCallbacks(
-              onImageEditingComplete: (Uint8List _) async {
+              onImageEditingComplete: (Uint8List result) async {
+                editedBytes = result;
                 Navigator.pop(context);
               },
             ),
           ),
         ),
       );
-    } catch (_) {
+
+      if (editedBytes == null || !context.mounted) return;
+
+      AppSnackBar.info(context, 'Đang lưu ảnh...');
+
+      // Lưu vào thư viện điện thoại
+      bool savedToGallery = false;
+      try {
+        await Gal.putImageBytes(editedBytes!);
+        savedToGallery = true;
+      } catch (_) {}
+
+      // Lưu lên Firebase nếu đã đăng nhập
+      bool savedToFirebase = false;
+      final user = AuthService().currentUser;
+      if (user != null) {
+        try {
+          await LocalVideoRepository().saveImage(
+            bytes: editedBytes!,
+            title:
+                'Ảnh chỉnh sửa ${DateTime.now().day}/${DateTime.now().month}',
+          );
+          savedToFirebase = true;
+        } catch (_) {}
+      }
+
+      if (!context.mounted) return;
+
+      if (savedToGallery && savedToFirebase) {
+        AppSnackBar.success(context, '✅ Đã lưu vào thư viện và Dự án!');
+      } else if (savedToGallery) {
+        AppSnackBar.success(context, '✅ Đã lưu vào thư viện điện thoại!');
+      } else if (savedToFirebase) {
+        AppSnackBar.success(context, '✅ Đã lưu vào Dự án!');
+      } else {
+        AppSnackBar.warning(
+          context,
+          'Không thể lưu ảnh. Kiểm tra quyền truy cập!',
+        );
+      }
+    } catch (e) {
       if (context.mounted) {
-        AppSnackBar.error(context, 'Không thể mở ảnh, thử lại!');
+        AppSnackBar.error(context, 'Lỗi: $e');
       }
     }
   }
@@ -200,17 +263,19 @@ class _MainPage extends StatelessWidget {
                       IconButton(
                         icon: const Icon(Icons.search,
                             color: AppTheme.textSecondary),
-                        onPressed: () {},
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.help_outline,
-                            color: AppTheme.textSecondary),
-                        onPressed: () {},
+                        tooltip: 'Tìm kiếm video',
+                        onPressed: onSearchTap,
                       ),
                       IconButton(
                         icon: const Icon(Icons.settings_outlined,
                             color: AppTheme.textSecondary),
-                        onPressed: () {},
+                        tooltip: 'Cài đặt',
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const SettingsPage(),
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -271,7 +336,7 @@ class _MainPage extends StatelessWidget {
                 children: [
                   ToolItemWidget(
                     icon: Icons.flash_on_rounded,
-                    label: 'AutoCut',
+                    label: 'Chỉnh sửa Pro',
                     color: Colors.orange,
                     onTap: () => Navigator.push(
                       context,
@@ -294,13 +359,13 @@ class _MainPage extends StatelessWidget {
                   ),
                   ToolItemWidget(
                     icon: Icons.auto_awesome_rounded,
-                    label: 'Công cụ AI',
+                    label: 'Tạo nội dung AI',
                     color: Colors.amber,
                     onTap: () => _openAiLab(context),
                   ),
                   ToolItemWidget(
                     icon: Icons.upload_rounded,
-                    label: 'Xuất video',
+                    label: 'Xuất & Xử lý',
                     color: Colors.green,
                     onTap: () => Navigator.push(
                       context,
@@ -311,7 +376,7 @@ class _MainPage extends StatelessWidget {
                   ),
                   ToolItemWidget(
                     icon: Icons.image_search_rounded,
-                    label: 'Hình thu nhỏ',
+                    label: 'Tạo thumbnail',
                     color: Colors.purple,
                     onTap: () => Navigator.push(
                       context,
@@ -322,19 +387,18 @@ class _MainPage extends StatelessWidget {
                   ),
                   ToolItemWidget(
                     icon: Icons.content_cut_rounded,
-                    label: 'Trình chỉnh sửa',
+                    label: 'Chỉnh sửa cơ bản',
                     color: Colors.teal,
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) =>
-                            const VideoEditorBasicExamplePage(),
+                        builder: (_) => const VideoEditorBasicExamplePage(),
                       ),
                     ),
                   ),
                   ToolItemWidget(
                     icon: Icons.audiotrack_rounded,
-                    label: 'Âm thanh',
+                    label: 'Xuất âm thanh',
                     color: Colors.indigo,
                     onTap: () => Navigator.push(
                       context,

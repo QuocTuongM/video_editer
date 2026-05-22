@@ -104,6 +104,22 @@ class ProfilePage extends StatelessWidget {
                       ),
                     ],
                   ),
+                  if (user != null)
+                    _buildMenuSection(
+                      title: 'Tài khoản',
+                      items: [
+                        _MenuItem(
+                          icon: Icons.lock_outline,
+                          label: 'Đổi mật khẩu',
+                          onTap: () => _showChangePassword(context, user),
+                        ),
+                        _MenuItem(
+                          icon: Icons.email_outlined,
+                          label: user.email ?? '',
+                          onTap: null,
+                        ),
+                      ],
+                    ),
                   _buildMenuSection(
                     title: 'Hỗ trợ',
                     items: [
@@ -488,6 +504,18 @@ class ProfilePage extends StatelessWidget {
 
   // ─── Edit Profile Dialog ─────────────────────────────────────────────────
 
+  Future<void> _showChangePassword(BuildContext context, User user) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF0B0F1A),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => _ChangePasswordSheet(user: user),
+    );
+  }
+
   Future<void> _showEditProfile(BuildContext context, User user) async {
     await showModalBottomSheet<void>(
       context: context,
@@ -735,11 +763,12 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
       padding: EdgeInsets.only(
         bottom: MediaQuery.viewInsetsOf(context).bottom,
       ),
-      child: Container(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+      child: SingleChildScrollView(
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Handle
             Center(
@@ -843,8 +872,245 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
             ),
             const SizedBox(height: 8),
           ],
+          ),
         ),
       ),
+    );
+  }
+}
+
+
+// ─── Change Password Sheet ───────────────────────────────────────────────────
+
+class _ChangePasswordSheet extends StatefulWidget {
+  const _ChangePasswordSheet({required this.user});
+  final User user;
+
+  @override
+  State<_ChangePasswordSheet> createState() => _ChangePasswordSheetState();
+}
+
+class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
+  final _currentCtrl = TextEditingController();
+  final _newCtrl = TextEditingController();
+  final _confirmCtrl = TextEditingController();
+  bool _showCurrent = false;
+  bool _showNew = false;
+  bool _showConfirm = false;
+  bool _isSaving = false;
+
+  @override
+  void dispose() {
+    _currentCtrl.dispose();
+    _newCtrl.dispose();
+    _confirmCtrl.dispose();
+    super.dispose();
+  }
+
+  String? _validate() {
+    if (_currentCtrl.text.isEmpty) return 'Nhập mật khẩu hiện tại.';
+    if (_newCtrl.text.length < 6) return 'Mật khẩu mới phải ít nhất 6 ký tự.';
+    if (_newCtrl.text != _confirmCtrl.text) return 'Xác nhận mật khẩu không khớp.';
+    if (_newCtrl.text == _currentCtrl.text) return 'Mật khẩu mới phải khác mật khẩu cũ.';
+    return null;
+  }
+
+  Future<void> _save() async {
+    final err = _validate();
+    if (err != null) {
+      AppSnackBar.warning(context, err);
+      return;
+    }
+
+    setState(() => _isSaving = true);
+    try {
+      // Re-authenticate trước khi đổi mật khẩu
+      final cred = EmailAuthProvider.credential(
+        email: widget.user.email!,
+        password: _currentCtrl.text,
+      );
+      await widget.user.reauthenticateWithCredential(cred);
+      await widget.user.updatePassword(_newCtrl.text);
+
+      if (!mounted) return;
+      AppSnackBar.success(context, '✅ Đổi mật khẩu thành công!');
+      Navigator.pop(context);
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      String msg;
+      switch (e.code) {
+        case 'wrong-password':
+        case 'invalid-credential':
+          msg = 'Mật khẩu hiện tại không đúng.';
+          break;
+        case 'too-many-requests':
+          msg = 'Thử quá nhiều lần. Vui lòng thử lại sau.';
+          break;
+        case 'weak-password':
+          msg = 'Mật khẩu mới quá yếu.';
+          break;
+        default:
+          msg = 'Lỗi: \${e.message}';
+      }
+      AppSnackBar.error(context, msg);
+    } catch (e) {
+      if (!mounted) return;
+      AppSnackBar.error(context, 'Lỗi không xác định: \$e');
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.viewInsetsOf(context).bottom,
+      ),
+      child: SingleChildScrollView(
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 36, height: 4,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF243044),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              'Đổi mật khẩu',
+              style: TextStyle(
+                fontSize: 18, fontWeight: FontWeight.bold,
+                color: Color(0xFFF8FAFC),
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Nhập mật khẩu hiện tại để xác nhận danh tính.',
+              style: TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
+            ),
+            const SizedBox(height: 20),
+
+            // Mật khẩu hiện tại
+            const Text('Mật khẩu hiện tại',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF94A3B8))),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _currentCtrl,
+              obscureText: !_showCurrent,
+              style: const TextStyle(color: Color(0xFFF8FAFC)),
+              decoration: InputDecoration(
+                hintText: 'Nhập mật khẩu hiện tại',
+                prefixIcon: const Icon(Icons.lock_outline),
+                suffixIcon: IconButton(
+                  icon: Icon(_showCurrent ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                  onPressed: () => setState(() => _showCurrent = !_showCurrent),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+
+            // Mật khẩu mới
+            const Text('Mật khẩu mới',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF94A3B8))),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _newCtrl,
+              obscureText: !_showNew,
+              style: const TextStyle(color: Color(0xFFF8FAFC)),
+              onChanged: (_) => setState(() {}),
+              decoration: InputDecoration(
+                hintText: 'Ít nhất 6 ký tự',
+                prefixIcon: const Icon(Icons.lock_reset_outlined),
+                suffixIcon: IconButton(
+                  icon: Icon(_showNew ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                  onPressed: () => setState(() => _showNew = !_showNew),
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            _buildStrengthBar(_newCtrl.text),
+            const SizedBox(height: 14),
+
+            // Xác nhận mật khẩu mới
+            const Text('Xác nhận mật khẩu mới',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF94A3B8))),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _confirmCtrl,
+              obscureText: !_showConfirm,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _save(),
+              style: const TextStyle(color: Color(0xFFF8FAFC)),
+              decoration: InputDecoration(
+                hintText: 'Nhập lại mật khẩu mới',
+                prefixIcon: const Icon(Icons.check_circle_outline),
+                suffixIcon: IconButton(
+                  icon: Icon(_showConfirm ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                  onPressed: () => setState(() => _showConfirm = !_showConfirm),
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            FilledButton(
+              onPressed: _isSaving ? null : _save,
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(double.infinity, 50),
+              ),
+              child: _isSaving
+                  ? const SizedBox(
+                      width: 20, height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Text('Xác nhận đổi mật khẩu'),
+            ),
+            const SizedBox(height: 8),
+          ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStrengthBar(String pwd) {
+    if (pwd.isEmpty) return const SizedBox.shrink();
+    int strength = 0;
+    if (pwd.length >= 6) strength++;
+    if (pwd.length >= 10) strength++;
+    if (pwd.contains(RegExp(r'[A-Z]'))) strength++;
+    if (pwd.contains(RegExp(r'[0-9]'))) strength++;
+    if (pwd.contains(RegExp(r'[!@#\$%^&*]'))) strength++;
+
+    final colors = [Colors.red, Colors.orange, Colors.yellow, Colors.lightGreen, Colors.green];
+    final labels = ['Rất yếu', 'Yếu', 'Trung bình', 'Mạnh', 'Rất mạnh'];
+    final idx = (strength - 1).clamp(0, 4);
+    final color = strength == 0 ? Colors.grey : colors[idx];
+    final label = strength == 0 ? '' : labels[idx];
+
+    return Row(
+      children: [
+        Expanded(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: strength / 5,
+              backgroundColor: const Color(0xFF243044),
+              color: color,
+              minHeight: 4,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(label, style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.w600)),
+      ],
     );
   }
 }
@@ -853,10 +1119,10 @@ class _MenuItem {
   const _MenuItem({
     required this.icon,
     required this.label,
-    required this.onTap,
+    this.onTap,
   });
 
   final IconData icon;
   final String label;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 }

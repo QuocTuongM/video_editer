@@ -9,9 +9,12 @@ list(APPEND FLUTTER_PLUGIN_LIST
   firebase_auth
   firebase_core
   firebase_storage
+  gal
   media_kit_libs_windows_video
   media_kit_video
   pro_video_editor
+  share_plus
+  url_launcher_windows
   volume_controller
 )
 

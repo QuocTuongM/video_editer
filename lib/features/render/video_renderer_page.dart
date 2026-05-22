@@ -77,7 +77,8 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
       _outputMetadata = null;
     });
 
-    AppSnackBar.success(context, 'Đã chọn: ${file.name}');
+    if (!mounted) return;
+    AppSnackBar.success(context, 'Đã chọn: \${file.name}');
   }
 
   // ─── Xuất video ─────────────────────────────────────────────────────────

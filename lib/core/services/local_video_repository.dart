@@ -6,7 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 
-/// Repository xử lý upload video lên Firebase Storage
+/// Repository xử lý upload video/ảnh lên Firebase Storage
 /// và lưu metadata vào Firestore.
 class LocalVideoRepository {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -17,7 +17,7 @@ class LocalVideoRepository {
   User get _currentUser {
     final user = _auth.currentUser;
     if (user == null) {
-      throw Exception('Bạn cần đăng nhập trước khi lưu video.');
+      throw Exception('Bạn cần đăng nhập trước khi lưu.');
     }
     return user;
   }
@@ -57,6 +57,7 @@ class LocalVideoRepository {
     required String type,
     required String title,
     int? durationMs,
+    void Function(double progress)? onProgress,
   }) async {
     final user = _currentUser;
 
@@ -76,23 +77,40 @@ class LocalVideoRepository {
     final contentType = _contentTypeFromExtension(extension);
     final storageRef = _storage.ref(storagePath);
 
-    // Upload file + tính sizeBytes chính xác
     TaskSnapshot snapshot;
     int sizeBytes;
 
     if (!kIsWeb && sourcePath != null && sourcePath.isNotEmpty) {
       final file = File(sourcePath);
-      sizeBytes = await file.length(); // ← lấy size thật từ file
-      snapshot = await storageRef.putFile(
+      sizeBytes = await file.length();
+      final uploadTask = storageRef.putFile(
         file,
         SettableMetadata(contentType: contentType),
       );
+      if (onProgress != null) {
+        uploadTask.snapshotEvents.listen((event) {
+          final total = event.totalBytes;
+          if (total > 0) {
+            onProgress(event.bytesTransferred / total);
+          }
+        });
+      }
+      snapshot = await uploadTask;
     } else if (bytes != null && bytes.isNotEmpty) {
       sizeBytes = bytes.length;
-      snapshot = await storageRef.putData(
+      final uploadTaskData = storageRef.putData(
         bytes,
         SettableMetadata(contentType: contentType),
       );
+      if (onProgress != null) {
+        uploadTaskData.snapshotEvents.listen((event) {
+          final total = event.totalBytes;
+          if (total > 0) {
+            onProgress(event.bytesTransferred / total);
+          }
+        });
+      }
+      snapshot = await uploadTaskData;
     } else {
       throw Exception('Không có dữ liệu để upload.');
     }
@@ -114,6 +132,7 @@ class LocalVideoRepository {
       'contentType': contentType,
       'sizeBytes': sizeBytes,
       'durationMs': durationMs,
+      'mediaType': 'video',
 
       // AI fields
       'aiSubtitleStatus': 'idle',
@@ -133,7 +152,70 @@ class LocalVideoRepository {
     return docRef.id;
   }
 
-  /// Xóa video trên Storage và metadata trên Firestore.
+  /// Lưu ảnh đã chỉnh sửa lên Storage + Firestore.
+  Future<String> saveImage({
+    required Uint8List bytes,
+    String title = 'Ảnh đã chỉnh sửa',
+    void Function(double progress)? onProgress,
+  }) async {
+    final user = _currentUser;
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final safeTitle = _sanitizeFileName(title);
+    final fileName = '${safeTitle}_$now.jpg';
+    final storagePath = 'users/${user.uid}/images/$fileName';
+    final storageRef = _storage.ref(storagePath);
+
+    final imgTask = storageRef.putData(
+      bytes,
+      SettableMetadata(contentType: 'image/jpeg'),
+    );
+    if (onProgress != null) {
+      imgTask.snapshotEvents.listen((event) {
+        final total = event.totalBytes;
+        if (total > 0) onProgress(event.bytesTransferred / total);
+      });
+    }
+    final snapshot = await imgTask;
+
+    final downloadUrl = await snapshot.ref.getDownloadURL();
+
+    final docRef = await _db
+        .collection('users')
+        .doc(user.uid)
+        .collection('videos')
+        .add({
+      'ownerId': user.uid,
+      'title': title,
+      'type': 'image',
+      'fileName': fileName,
+      'originalFileName': fileName,
+      'storagePath': storagePath,
+      'downloadUrl': downloadUrl,
+      'contentType': 'image/jpeg',
+      'sizeBytes': bytes.length,
+      'durationMs': null,
+      'mediaType': 'image',
+
+      // AI fields
+      'aiSubtitleStatus': 'idle',
+      'aiContentStatus': 'idle',
+      'transcriptText': '',
+      'aiTitle': '',
+      'aiTitles': <String>[],
+      'aiDescription': '',
+      'aiHashtags': <String>[],
+      'aiError': '',
+      'aiUpdatedAt': null,
+
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    return docRef.id;
+  }
+
+  /// Xóa video/ảnh trên Storage và metadata trên Firestore.
   Future<void> deleteVideo({
     required String videoId,
     required String storagePath,
@@ -194,6 +276,6 @@ class LocalVideoRepository {
         .toLowerCase()
         .replaceAll(RegExp(r'[^a-z0-9_\-]+'), '_')
         .replaceAll(RegExp(r'_+'), '_');
-    return cleaned.isEmpty ? 'video' : cleaned;
+    return cleaned.isEmpty ? 'file' : cleaned;
   }
 }
